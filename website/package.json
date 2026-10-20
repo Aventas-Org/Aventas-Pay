@@ -1,0 +1,15 @@
+{
+  "name": "@avantas/checkout-api",
+  "version": "0.1.0-stage1",
+  "private": true,
+  "description": "Aventas Stage 1 checkout-session API core (domain logic + handlers). Designed to be transplanted into the Aventas-website Cloudflare Worker (functions/api) once repo access is available.",
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.3",
+    "typescript": "^5.6.0"
+  }
+}

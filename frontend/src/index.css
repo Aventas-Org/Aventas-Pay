@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(1100px 500px at 80% -10%, rgba(45, 212, 167, 0.12), transparent 60%),
+    radial-gradient(900px 420px at 10% 110%, rgba(56, 120, 255, 0.1), transparent 55%),
+    #0b1220;
+  color: #e6edf7;
+  font-family: "Inter", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
