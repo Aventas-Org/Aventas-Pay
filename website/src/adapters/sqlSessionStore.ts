@@ -7,10 +7,10 @@
  * surfaced as IdempotencyConflict, and the optimistic status transition is a
  * single guarded UPDATE so concurrent writers cannot clobber each other.
  *
- * Timestamps are stored as ISO-8601 TEXT, which sorts lexicographically and
- * compares correctly for the range/point queries used here. If the Aventas
- * website schema uses INTEGER epoch seconds, only the two `toDb/fromDb` helpers
- * at the bottom of this file need changing.
+ * Timestamps are stored as INTEGER epoch-milliseconds, matching the
+ * Aventas-website convention (orders.placed_at, *.created_at, etc). The
+ * migrations declare these columns as INTEGER; epoch numbers also sort and
+ * compare correctly for the range/point queries used here.
  */
 
 import {
@@ -55,10 +55,10 @@ interface SessionRow {
   token_hash: string;
   source: string;
   provider_transaction_ref: string | null;
-  created_at: string;
-  updated_at: string;
-  expires_at: string;
-  paid_at: string | null;
+  created_at: number;
+  updated_at: number;
+  expires_at: number;
+  paid_at: number | null;
 }
 
 export class SqlSessionStore implements SessionStore {
@@ -179,8 +179,9 @@ export class SqlSessionStore implements SessionStore {
   }
 }
 
-function toDb(date: Date): string {
-  return date.toISOString();
+/** Epoch-milliseconds, matching the website's INTEGER timestamp columns. */
+function toDb(date: Date): number {
+  return date.getTime();
 }
 
 function fromDb(row: SessionRow): CheckoutSession {
@@ -202,6 +203,6 @@ function fromDb(row: SessionRow): CheckoutSession {
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
     expiresAt: new Date(row.expires_at),
-    paidAt: row.paid_at ? new Date(row.paid_at) : null,
+    paidAt: row.paid_at === null || row.paid_at === undefined ? null : new Date(row.paid_at),
   };
 }

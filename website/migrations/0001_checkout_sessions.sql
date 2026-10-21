@@ -2,9 +2,11 @@
 --
 -- STATUS: DRAFT. Written against the Stage 1 contract before Aventas-website
 -- repository access was available. Before applying:
---   1. Confirm the existing api/schema.sql conventions (id format, timestamp
---      type: INTEGER epoch vs ISO TEXT, migration file naming/ordering) and align
---      this file's conventions with them. The statements below are purely
+--   1. CONFIRMED (integration audit): Aventas-website stores every timestamp
+--      as INTEGER epoch-milliseconds (orders.placed_at, *.created_at, etc).
+--      This migration is aligned to that convention below: created_at,
+--      updated_at, expires_at and paid_at are INTEGER epoch-ms, NOT ISO TEXT.
+--      Monetary values stay integer paise. The statements below are purely
 --      additive: they create new objects only and never ALTER or DROP anything
 --      existing, so they are safe to apply on top of any current schema.
 --   2. Apply with:  wrangler d1 migrations apply <DATABASE_NAME> --remote
@@ -39,10 +41,11 @@ CREATE TABLE IF NOT EXISTS checkout_sessions (
   token_hash               TEXT    NOT NULL,
   source                   TEXT    NOT NULL DEFAULT 'discord_bot',
   provider_transaction_ref TEXT,
-  created_at               TEXT    NOT NULL,
-  updated_at               TEXT    NOT NULL,
-  expires_at               TEXT    NOT NULL,
-  paid_at                  TEXT
+  -- INTEGER epoch-milliseconds, matching the website's existing convention.
+  created_at               INTEGER NOT NULL,
+  updated_at               INTEGER NOT NULL,
+  expires_at               INTEGER NOT NULL,
+  paid_at                  INTEGER
 );
 
 -- lookup by hashed public token (the plaintext token is never stored)
@@ -60,11 +63,10 @@ CREATE INDEX IF NOT EXISTS idx_checkout_sessions_expires
 
 CREATE TABLE IF NOT EXISTS checkout_session_events (
   id          TEXT PRIMARY KEY,
-  session_id  TEXT NOT NULL REFERENCES checkout_sessions (id),
-  event_type  TEXT NOT NULL,
-  actor       TEXT NOT NULL,
+  session_id  TEXT NOT NULL REFERENCES checkout_sessions (id),  event_type  TEXT    NOT NULL,
+  actor       TEXT    NOT NULL,
   detail      TEXT,
-  created_at  TEXT NOT NULL
+  created_at  INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_checkout_session_events_session
