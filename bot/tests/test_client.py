@@ -256,7 +256,7 @@ async def test_timeout_raises_checkout_timeout_after_bounded_attempts(server):
     await client.__aexit__()
 
 
-async def test_connection_refused_is_network_error():
+async def test_unreachable_api_is_bounded_transport_failure():
     cfg = make_config(
         "http://127.0.0.1:9/api",
         max_retries=1,
@@ -264,10 +264,10 @@ async def test_connection_refused_is_network_error():
         total_timeout_seconds=0.2,
     )
     client = CheckoutClient(cfg, sleep=no_sleep)
-    await client.__aenter__()
-    with pytest.raises(CheckoutNetworkError):
-        await client.create_checkout_session(ORDER, PROFILE, actor_discord_id=ORDER.owner_discord_id)
-    await client.__aexit__()
+    async with client:
+        # A closed port may fail immediately or time out behind a local firewall.
+        with pytest.raises((CheckoutNetworkError, CheckoutTimeout)):
+            await client.create_checkout_session(ORDER, PROFILE, actor_discord_id=ORDER.owner_discord_id)
 
 
 async def test_4xx_is_not_retried(server):
