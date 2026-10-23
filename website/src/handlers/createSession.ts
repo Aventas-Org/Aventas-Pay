@@ -15,15 +15,9 @@
  * accepts amounts or recipients.
  */
 
+import { IdempotencyConflict, systemClock } from "../domain/types";
+import type { CheckoutSession, Clock, SessionStore } from "../domain/types";
 import {
-  CheckoutSession,
-  Clock,
-  IdempotencyConflict,
-  SessionStore,
-  systemClock,
-} from "../domain/types";
-import {
-  ApiError,
   notFound,
   rateLimited,
   unauthorized,
@@ -33,9 +27,11 @@ import { deriveCheckoutToken, hashCheckoutToken, constantTimeEqual } from "../do
 import { validateCreateSessionRequest } from "../domain/validation";
 import { deriveIdempotencyKey, nextAttempt, reusableSession } from "../domain/idempotency";
 import { effectiveStatus } from "../domain/stateMachine";
-import { RateLimiter } from "../domain/rateLimit";
-import { CheckoutLogger, nullLogger } from "../domain/log";
-import { HandlerRequest, HandlerResponse, dispatch, jsonResponse, parseJsonBody } from "./http";
+import type { RateLimiter } from "../domain/rateLimit";
+import { nullLogger } from "../domain/log";
+import type { CheckoutLogger } from "../domain/log";
+import { dispatch, jsonResponse, parseJsonBody } from "./http";
+import type { HandlerRequest, HandlerResponse } from "./http";
 import { toBotCreateResponse } from "./view";
 
 export interface CreateSessionDeps {

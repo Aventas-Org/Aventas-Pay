@@ -34,7 +34,7 @@ if (!BOT_SECRET || !TOKEN_SECRET) {
 }
 
 const db = new Database(":memory:", { create: true });
-for (const file of ["0001_checkout_sessions.sql", "0002_rate_limits.sql"]) {
+for (const file of ["0001_checkout_sessions.sql", "0002_rate_limits.sql", "0003_verification_uniqueness.sql"]) {
   db.run(readFileSync(join(import.meta.dir, "..", "..", "migrations", file), "utf8"));
 }
 const executor = new BunSqliteExecutor(db);

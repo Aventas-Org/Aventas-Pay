@@ -26,9 +26,9 @@ const ROW = {
   token_hash: "hash-1",
   source: "discord_bot",
   provider_transaction_ref: null,
-  created_at: "2026-10-20T10:00:00.000Z",
-  updated_at: "2026-10-20T10:00:00.000Z",
-  expires_at: "2026-10-20T10:30:00.000Z",
+  created_at: Date.parse("2026-10-20T10:00:00.000Z"),
+  updated_at: Date.parse("2026-10-20T10:00:00.000Z"),
+  expires_at: Date.parse("2026-10-20T10:30:00.000Z"),
   paid_at: null,
 };
 
@@ -165,23 +165,23 @@ describe("0001_checkout_sessions.sql against real SQLite", () => {
           `INSERT INTO checkout_session_events (id, session_id, event_type, actor, detail, created_at)
            VALUES (?, ?, ?, ?, ?, ?)`,
         )
-        .run("ev-1", "does-not-exist", "SESSION_CREATED", "bot", "{}", "2026-10-20T10:00:00.000Z"),
+        .run("ev-1", "does-not-exist", "SESSION_CREATED", "bot", "{}", ROW.created_at),
     ).toThrow(/FOREIGN KEY constraint failed/);
   });
 
-  test("ISO timestamps sort and compare correctly for expiry range queries", () => {
+  test("INTEGER epoch-ms timestamps sort and compare correctly for expiry range queries", () => {
     const { db } = migratedExecutor();
     insertRaw(db, {
       id: "a",
       token_hash: "ha",
       idempotency_key: "key-a",
-      expires_at: "2026-10-20T10:30:00.000Z",
+      expires_at: Date.parse("2026-10-20T10:30:00.000Z"),
     });
     insertRaw(db, {
       id: "b",
       token_hash: "hb",
       idempotency_key: "key-b",
-      expires_at: "2026-10-20T09:30:00.000Z",
+      expires_at: Date.parse("2026-10-20T09:30:00.000Z"),
     });
     const rows = db
       .query(
@@ -189,9 +189,11 @@ describe("0001_checkout_sessions.sql against real SQLite", () => {
          WHERE order_id = ? AND status = 'PENDING' AND expires_at > ?
          ORDER BY attempt DESC LIMIT 1`,
       )
-      .all("AVT-1", "2026-10-20T10:00:00.000Z") as Array<{ id: string }>;
+      .all("AVT-1", ROW.created_at) as Array<{ id: string }>;
     expect(rows).toHaveLength(1);
     expect(rows[0]!.id).toBe("a");
+    const stored = db.query("SELECT typeof(expires_at) AS type FROM checkout_sessions WHERE id = 'a'").get() as { type: string };
+    expect(stored.type).toBe("integer");
   });
 });
 

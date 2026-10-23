@@ -11,7 +11,7 @@
  *     returned from any public endpoint.
  */
 
-import { CheckoutSession } from "../domain/types";
+import type { CheckoutSession } from "../domain/types";
 import { buildUpiPayload, formatRupees } from "../domain/upi";
 
 export interface PublicSessionView {

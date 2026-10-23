@@ -13,14 +13,15 @@
  * compare correctly for the range/point queries used here.
  */
 
-import {
+import { IdempotencyConflict } from "../domain/types";
+import type {
   CheckoutSession,
-  IdempotencyConflict,
   SessionEvent,
   SessionStatus,
   SessionStore,
 } from "../domain/types";
-import { ConstraintViolation, SqlExecutor, SqlValue } from "./sqlPort";
+import { ConstraintViolation } from "./sqlPort";
+import type { SqlExecutor, SqlValue } from "./sqlPort";
 
 const INSERT_SESSION_SQL = `
 INSERT INTO checkout_sessions (
@@ -62,7 +63,11 @@ interface SessionRow {
 }
 
 export class SqlSessionStore implements SessionStore {
-  constructor(private readonly db: SqlExecutor) {}
+  private readonly db: SqlExecutor;
+
+  constructor(db: SqlExecutor) {
+    this.db = db;
+  }
 
   async insertSession(session: CheckoutSession, tokenHash: string): Promise<void> {
     const params: SqlValue[] = [

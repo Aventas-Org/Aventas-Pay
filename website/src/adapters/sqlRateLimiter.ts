@@ -11,8 +11,8 @@
  *   - buckets prune themselves when they roll over.
  */
 
-import { RateLimiter } from "../domain/rateLimit";
-import { SqlExecutor } from "./sqlPort";
+import type { RateLimiter } from "../domain/rateLimit";
+import type { SqlExecutor } from "./sqlPort";
 
 const UPSERT_SQL = `
 INSERT INTO checkout_rate_limits (bucket, window_start_ms, count)
@@ -29,11 +29,14 @@ interface LimiterRow {
 }
 
 export class SqlRateLimiter implements RateLimiter {
-  constructor(
-    private readonly db: SqlExecutor,
-    /** Prune rows older than this on each consume; bounds table growth. */
-    private readonly pruneOlderThanMs = 3_600_000,
-  ) {}
+  private readonly db: SqlExecutor;
+  /** Prune rows older than this on each consume; bounds table growth. */
+  private readonly pruneOlderThanMs: number;
+
+  constructor(db: SqlExecutor, pruneOlderThanMs = 3_600_000) {
+    this.db = db;
+    this.pruneOlderThanMs = pruneOlderThanMs;
+  }
 
   async consume(
     bucket: string,

@@ -1,54 +1,22 @@
 # Aventas-Pay
 
-Stage 1 foundation for the Aventas Discord-to-website checkout integration.
+Canonical checkout-session core for the Aventas Discord bot and website. The website vendors `website/src/{adapters,domain,handlers}` under `functions/api/pay/` and the three SQL migrations under `migrations/`. The website Worker mounts create, status, cancel, and trusted verify routes; its `/checkout/:token` page renders the stored UPI recipient and QR. The bot keeps its manual UPI, QR, and screenshot workflow and adds a hosted link only when checkout is enabled and reachable.
 
-This repository holds the **transplantable, tested core** of Stage 1, built
-against the Stage 1 brief while the `Aventas-Org/Aventas-bot` and
-`Aventas-Org/Aventas-website` repositories were unreachable. It is not yet
-wired into production systems; see `docs/WORK_REMAINING_BLOCKED.md` for what
-remains and how to resume.
+A checkout visit, QR scan, screenshot, or public poll never marks an order paid. Only the bot's trusted staff approval or verified Slice-email path may call the server-to-server verify endpoint. Checkout is disabled by default. Passing tests does not imply staging or production activation.
 
-## What Stage 1 is (and is not)
+## Source and verification
 
-Stage 1 establishes: checkout-session creation over an authenticated
-server-to-server contract, a website checkout page that renders the stored UPI
-recipient + QR and polls a safe status endpoint, and bot-side integration
-behind a feature flag. It does **not** implement automatic payment verification
-— no customer-reachable path can mark a session `PAID` — and it does not replace
-the existing manual UPI/screenshot workflow, which stays the fallback.
+- `website/`: checkout handlers, SQL store, durable rate limiter, additive migrations, and isolated handler/security tests.
+- `bot/`: checkout HTTP client and local cross-system tests against the real website handlers and disposable SQLite.
+- `frontend/`: standalone component, poller, and QR tests for the checkout UI; the website serves its integrated page.
+- `.github/workflows/checkout-ci.yml`: website tests/typecheck, bot and cross-system tests, frontend tests/typecheck.
 
-## Layout
+Run locally:
 
-| Path | Contents |
-|---|---|
-| `docs/CHECKOUT_API_CONTRACT.md` | Endpoint contracts, validation rules, state machine, example responses |
-| `docs/TRUST_BOUNDARY_UPI_ROUTING.md` | Trust model; how existing primary/backup UPI selection is preserved |
-| `docs/DEPLOYMENT_CHECKLIST.md` | Ordered transplant + migration + secret setup + smoke test |
-| `docs/WORK_REMAINING_BLOCKED.md` | What still requires repository access |
-| `docs/SECURITY_AUDIT_STAGE2.md` | Stage 2 audit: findings, fixes, residual risks |
-| `docs/INTEGRATION_MAP_AND_SOURCE_OF_TRUTH.md` | Integrated architecture, DB ownership, verification reality |
-| `website/` | Checkout-session domain core + handlers + D1 adapters (SQL store, SQL rate limiter) + tested migrations |
-| `bot/avantas_checkout/` | Async aiohttp client: timeouts, bounded retries, deterministic idempotency, redacted logging |
-| `frontend/` | Checkout page (Vite + React) + transplantable poller/QR-verification libs |
-
-## Tests (all executed at Stage 2 handoff)
-
-```
-cd website  && bun test        # 114 pass (unit + migration-on-SQLite + hardening + rate limiter)
-cd website  && bunx tsc --noEmit
-cd bot      && python3 -m pytest tests/test_client.py tests/test_config.py -q   # 32 pass
-cd bot      && python3 -m pytest tests/test_e2e.py -q                            # 7 pass (cross-system: real client -> real handlers -> real SQLite)
-cd frontend && bun test        # 38 pass (lib + component tests, all five states)
-cd frontend && bunx tsc --noEmit
+```sh
+(cd website && bun install --frozen-lockfile && bun test && bun run typecheck)
+(cd bot && python -m pip install aiohttp pytest pytest-asyncio && python -m pytest -q)
+(cd frontend && bun install --frozen-lockfile && bun test && bun run typecheck)
 ```
 
-The frontend also runs under the preview; every checkout state (loading,
-awaiting payment, confirmed, expired, unavailable) can be exercised with
-`/checkout/<any-token>?mock=pending|paid|expired|error`.
-
-## Configuration
-
-Bot side: see `bot/checkout.env.example`. Website side: two Worker secrets
-(`AVENTAS_PAYMENT_API_SECRET` shared with the bot, `AVENTAS_PAYMENT_TOKEN_SECRET`
-website-only) — setup commands in `docs/DEPLOYMENT_CHECKLIST.md`. No real
-secrets are committed anywhere in this repository.
+For the live repository state, configuration, staging sequence, acceptance criteria, and rollback, see [the staging runbook](docs/DEPLOYMENT_CHECKLIST.md). The older blocked-work notes have been replaced with a current summary in `docs/WORK_REMAINING_BLOCKED.md`.

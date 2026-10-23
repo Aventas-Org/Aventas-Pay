@@ -340,3 +340,22 @@ async def test_verified_payment_marks_session_paid_end_to_end(base_url):
     forged_status, _ = _verify(base_url, order.order_id, "UTR-E2E-FORGED", secret="wrong-secret-value-here")
     assert forged_status == 401
     assert public_status(base_url, created.checkout_token)[1]["status"] == "PAID"
+
+
+async def test_provider_reference_cannot_pay_two_orders(base_url):
+    orders = [
+        OrderFacts(
+            order_id=f"AVT-E2E-REF-{n}", owner_discord_id=ORDER.owner_discord_id,
+            product_id="vp-1000", product_name="1000 Valorant Points", amount_paise=99900,
+        )
+        for n in (1, 2)
+    ]
+    async with make_client(base_url) as client:
+        sessions = [
+            await client.create_checkout_session(order, PROFILE, actor_discord_id=order.owner_discord_id)
+            for order in orders
+        ]
+    assert _verify(base_url, orders[0].order_id, "FAKE-ONE-RECEIPT")[0] == 200
+    assert _verify(base_url, orders[1].order_id, "FAKE-ONE-RECEIPT")[0] == 409
+    assert public_status(base_url, sessions[0].checkout_token)[1]["status"] == "PAID"
+    assert public_status(base_url, sessions[1].checkout_token)[1]["status"] == "PENDING"

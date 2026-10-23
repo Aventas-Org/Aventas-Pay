@@ -6,12 +6,8 @@
  * must wire exclusively to a trusted verification integration in a later stage.
  */
 
-import {
-  CheckoutSession,
-  Clock,
-  SessionStatus,
-  TERMINAL_STATUSES,
-} from "./types";
+import { TERMINAL_STATUSES } from "./types";
+import type { CheckoutSession, Clock, SessionStatus } from "./types";
 
 export class IllegalTransition extends Error {
   constructor(from: SessionStatus, to: SessionStatus) {
