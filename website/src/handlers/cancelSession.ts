@@ -7,14 +7,15 @@
  * returns the current state with 200 and performs no transition.
  */
 
-import { CheckoutSession, Clock, SessionStore } from "../domain/types";
+import type { CheckoutSession, Clock, SessionStore } from "../domain/types";
 import { canTransition } from "../domain/stateMachine";
 import { deriveIdempotencyKey } from "../domain/idempotency";
 import { ApiError, rateLimited, validationError } from "../domain/errors";
 import { requireBotAuth } from "./auth";
-import { RateLimiter } from "../domain/rateLimit";
-import { CheckoutLogger, nullLogger } from "../domain/log";
-import { HandlerRequest, HandlerResponse, dispatch, jsonResponse, parseJsonBody } from "./http";
+import type { RateLimiter } from "../domain/rateLimit";
+import type { CheckoutLogger } from "../domain/log";
+import { dispatch, jsonResponse, parseJsonBody } from "./http";
+import type { HandlerRequest, HandlerResponse } from "./http";
 import { toPublicSessionView } from "./view";
 
 export interface CancelSessionDeps {

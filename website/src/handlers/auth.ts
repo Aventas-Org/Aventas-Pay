@@ -6,8 +6,9 @@
 
 import { constantTimeEqual } from "../domain/tokens";
 import { unauthorized } from "../domain/errors";
-import { CheckoutLogger, nullLogger } from "../domain/log";
-import { HandlerRequest } from "./http";
+import { nullLogger } from "../domain/log";
+import type { CheckoutLogger } from "../domain/log";
+import type { HandlerRequest } from "./http";
 
 export async function requireBotAuth(
   botApiSecret: string,

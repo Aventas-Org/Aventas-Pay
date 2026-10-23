@@ -1,16 +1,9 @@
--- Stage 1 additive migration for checkout sessions.
+-- Additive checkout-session migration for Aventas-website D1.
 --
--- STATUS: DRAFT. Written against the Stage 1 contract before Aventas-website
--- repository access was available. Before applying:
---   1. CONFIRMED (integration audit): Aventas-website stores every timestamp
---      as INTEGER epoch-milliseconds (orders.placed_at, *.created_at, etc).
---      This migration is aligned to that convention below: created_at,
---      updated_at, expires_at and paid_at are INTEGER epoch-ms, NOT ISO TEXT.
---      Monetary values stay integer paise. The statements below are purely
---      additive: they create new objects only and never ALTER or DROP anything
---      existing, so they are safe to apply on top of any current schema.
---   2. Apply with:  wrangler d1 migrations apply <DATABASE_NAME> --remote
---      (run `wrangler d1 migrations list <DATABASE_NAME>` first to confirm ordering).
+-- Timestamps use INTEGER epoch-milliseconds, matching the website schema.
+-- Monetary values use integer paise. Apply 0001, 0002, then 0003 to an
+-- isolated staging D1 database before enabling checkout there. Provisioning
+-- production requires a separate reviewed operator action.
 --
 -- Design notes:
 --   * Monetary values are integer paise (CHECK-validated), never floats.
@@ -63,7 +56,8 @@ CREATE INDEX IF NOT EXISTS idx_checkout_sessions_expires
 
 CREATE TABLE IF NOT EXISTS checkout_session_events (
   id          TEXT PRIMARY KEY,
-  session_id  TEXT NOT NULL REFERENCES checkout_sessions (id),  event_type  TEXT    NOT NULL,
+  session_id  TEXT NOT NULL REFERENCES checkout_sessions (id),
+  event_type  TEXT NOT NULL,
   actor       TEXT    NOT NULL,
   detail      TEXT,
   created_at  INTEGER NOT NULL

@@ -8,7 +8,7 @@
  * reached a terminal state, the next request legitimately opens attempt N+1.
  */
 
-import { CheckoutSession } from "./types";
+import type { CheckoutSession } from "./types";
 import { isActive } from "./stateMachine";
 
 export const CHECKOUT_OPERATION = "checkout-session";

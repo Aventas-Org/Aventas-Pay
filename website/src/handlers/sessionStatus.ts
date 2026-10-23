@@ -13,13 +13,15 @@
  *     revive it, and no public request can ever produce PAID.
  */
 
-import { Clock, SessionStore } from "../domain/types";
+import type { Clock, SessionStore } from "../domain/types";
 import { notFound, rateLimited } from "../domain/errors";
 import { hashCheckoutToken, looksLikeCheckoutToken } from "../domain/tokens";
 import { effectiveStatus } from "../domain/stateMachine";
-import { RateLimiter } from "../domain/rateLimit";
-import { CheckoutLogger, nullLogger } from "../domain/log";
-import { HandlerRequest, HandlerResponse, dispatch, jsonResponse } from "./http";
+import type { RateLimiter } from "../domain/rateLimit";
+import { nullLogger } from "../domain/log";
+import type { CheckoutLogger } from "../domain/log";
+import { dispatch, jsonResponse } from "./http";
+import type { HandlerRequest, HandlerResponse } from "./http";
 import { toPublicSessionView } from "./view";
 
 export interface SessionStatusDeps {
