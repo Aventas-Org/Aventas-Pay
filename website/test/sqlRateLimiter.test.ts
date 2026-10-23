@@ -3,6 +3,8 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { SqlRateLimiter } from "../src/adapters/sqlRateLimiter";
 import { migratedExecutor } from "./helpers/bunSqlite";
 
@@ -51,7 +53,7 @@ describe("SqlRateLimiter", () => {
   test("state survives reopening the database file (durability)", async () => {
     const { Database } = await import("bun:sqlite");
     const { BunSqliteExecutor, applyMigrations } = await import("./helpers/bunSqlite");
-    const file = `/tmp/avantas-ratelimit-${crypto.randomUUID()}.sqlite`;
+    const file = join(tmpdir(), `avantas-ratelimit-${crypto.randomUUID()}.sqlite`);
     try {
       const db1 = new Database(file, { create: true });
       applyMigrations(db1);
@@ -66,7 +68,6 @@ describe("SqlRateLimiter", () => {
       db2.close();
     } finally {
       try {
-        await Bun.write(file, "");
         const { unlink } = await import("node:fs/promises");
         await unlink(file);
       } catch {

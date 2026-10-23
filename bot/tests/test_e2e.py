@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -82,7 +83,7 @@ def base_url():
     env["E2E_BOT_SECRET"] = E2E_BOT_SECRET
     env["E2E_TOKEN_SECRET"] = E2E_TOKEN_SECRET
     process = subprocess.Popen(
-        ["bun", "run", str(SERVER_SCRIPT)],
+        [shutil.which("bun") or "bun", "run", str(SERVER_SCRIPT)],
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
