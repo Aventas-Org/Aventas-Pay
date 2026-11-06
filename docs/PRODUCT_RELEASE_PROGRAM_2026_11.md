@@ -10,6 +10,8 @@ Two non-interchangeable releases:
 - **Track A — human-verified hosted UPI**, contingent on verified real staging, independent staff review of merchant account, truthful customer messaging, safe manual fallback, durable notification reconciliation, merchant/finance/infra approval. This track can be rolled out without pretending email proves settlement.
 - **Track B — independently authenticated PSP/bank automated settlement**, only after a merchant contract and separate implementation of trusted signed events, replay protection, amount/order/payee mapping, refunds/disputes/settlement reconciliation, risk & legal controls. Track B must never be enabled merely by flipping `AVENTAS_SLICE_AUTO_APPROVAL_ENABLED`.
 
+**Track B design-only contract:** [Authenticated PSP/bank webhook and settlement adapter specification](VERIFIED_PSP_SETTLEMENT_CONTRACT.md). It deliberately adds no provider endpoint, credentials or launch switch. Provider selection, signing implementation, sandbox acceptance and merchant/compliance sign-off remain blocked under #18.
+
 ### Trust boundaries and source of truth
 
 | Component | Allowed | Not allowed |
