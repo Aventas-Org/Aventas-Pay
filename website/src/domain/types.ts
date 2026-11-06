@@ -77,6 +77,8 @@ export interface SessionStore {  /**
   findById(sessionId: string): Promise<CheckoutSession | null>;
   /** Most recent active (PENDING and unexpired) session for an order, if any. */
   findActiveByOrderId(orderId: string, now: Date): Promise<CheckoutSession | null>;
+  /** Any already-paid session for an order; paid orders cannot be reopened. */
+  findPaidByOrderId(orderId: string): Promise<CheckoutSession | null>;
   /** Highest attempt recorded for an idempotency key (any status), if any. */
   findLatestByIdempotencyKey(key: string): Promise<CheckoutSession | null>;
   /**
