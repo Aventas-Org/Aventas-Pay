@@ -51,7 +51,7 @@ describe("CheckoutPage states", () => {
 
   test("confirmed state uses staff-verified wording and hides payment steps", async () => {
     await renderState("paid");
-    expect(screen.getByText(/Order marked paid by Aventas/i)).toBeTruthy();
+    expect(screen.getAllByText(/Order marked paid by Aventas/i).length).toBe(2);
     expect(screen.queryByText(/Scan with any UPI app/i)).toBeNull();
   });
 
