@@ -266,6 +266,13 @@ class CheckoutClient:
             self._session = aiohttp.ClientSession(timeout=timeout)
             self._owns_session = True
 
+        # Public status paths contain a bearer capability, including tokens
+        # shorter than the generic log redactor recognises. Log the route only.
+        log_path = path
+        prefix = "/api/payments/checkout-sessions/"
+        if method == "GET" and path.startswith(prefix):
+            log_path = prefix + "[REDACTED]"
+
         attempts = self._config.max_retries + 1
         ctx = dict(context or {})
         last_error: str = "unknown"
@@ -277,6 +284,8 @@ class CheckoutClient:
                     f"{self._config.api_url}{path}",
                     json=json_body,
                     headers=self._headers(),
+                    # Never forward payment data or credentials through a redirect.
+                    allow_redirects=False,
                 ) as resp:
                     body: Any
                     try:
@@ -287,7 +296,7 @@ class CheckoutClient:
                         _log(
                             "http_response",
                             method=method,
-                            path=path,
+                            path=log_path,
                             http_status=resp.status,
                             attempt=attempt + 1,
                             **ctx,
@@ -308,7 +317,7 @@ class CheckoutClient:
             _log(
                 "retrying",
                 method=method,
-                path=path,
+                path=log_path,
                 attempt=attempt + 1,
                 delay_ms=int(delay * 1000),
                 reason=last_error,
@@ -319,7 +328,7 @@ class CheckoutClient:
         _log(
             "request_failed",
             method=method,
-            path=path,
+            path=log_path,
             attempts=attempts,
             reason=last_error,
             **ctx,
