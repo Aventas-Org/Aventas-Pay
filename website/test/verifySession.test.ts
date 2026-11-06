@@ -246,6 +246,9 @@ describe("handleVerifySession", () => {
     expect(blob).not.toContain(BOT_SECRET);
     expect(blob).not.toContain(TOKEN_SECRET);
     expect(blob).not.toContain("123456789012345678");
+    // Short provider references are bank receipt evidence, not telemetry.
+    expect(blob).not.toContain("UTR-LOG-TEST1");
+    expect(recorded!.fields.provider_transaction_ref).toBe("[REDACTED]");
   });
 });
 

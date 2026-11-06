@@ -42,3 +42,17 @@ The initial coverage-enabled head run of Pay [PR #36](https://github.com/Aventas
 | Standalone checkout UI/QR/poller | 44 passed, 0 failed | 95.91% | 99.07% | 80% | 90% |
 
 `bun test --coverage` enforces the configured thresholds per file and fails CI if a covered file falls below the floor. The thresholds deliberately leave headroom for error-path work and include test helper modules where Bun includes them. Coverage numbers are **unit/integration-in-process metrics**, not evidence of browser compatibility, Cloudflare staging, Discord guild behavior, correct settlement or legal compliance. Baseline is not an authorization to activate hosted checkout.
+
+## Merchant receipt reference privacy (2026-11-06)
+
+The canonical checkout Worker verification handler records a `provider_transaction_ref`
+for idempotent state changes. It must remain accessible **only** in the
+restricted persistence/audit path, not operational Worker logs, shared CI or
+public issue descriptions. The structured logger masks this key and common
+provider/bank aliases regardless of value length, including four-character
+references that the generic 40-character bearer heuristic misses. Regression
+tests exercise the actual trusted verify handler, the in-memory capture logger
+and JSON console output. No payment-state logic or stored reference changes.
+The website must import the exact canonical logger file through its pinned
+22-file vendor manifest; this is not a substitute for merchant-approved
+receipt retention and access policies under Pay #22.
