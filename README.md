@@ -24,3 +24,5 @@ For the live repository state, configuration, staging sequence, acceptance crite
 The standalone demo requires Node.js 22.12+ or 24+ for Vite 8. Build assets in `frontend/dist/` are generated locally and are not source-controlled; the deployed website owns its own checkout bundle. Run `bun audit` in both JavaScript packages before release.
 
 Amount-only email parsing and optional decimal reconciliation suggestions are review-only utilities; they cannot mark orders paid. See [the amount-only design](docs/AMOUNT_ONLY_EMAIL_RECONCILIATION.md) and the [verified PSP contract](docs/VERIFIED_PSP_SETTLEMENT_CONTRACT.md).
+
+Provider candidate screening is review-only and not a live PSP integration. See [staging inventory](docs/STAGING_READONLY_INVENTORY_2026_11_06.md) and [provider contract](docs/VERIFIED_PSP_SETTLEMENT_CONTRACT.md).

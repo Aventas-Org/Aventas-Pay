@@ -223,3 +223,18 @@ a generic signing stub alone.
 
 Until then, keep [Pay #18](https://github.com/Aventas-Org/Aventas-Pay/issues/18)
 open; leave all automated bank/PSP settlement paths **UNIMPLEMENTED/OFF**.
+
+## Incremental verification code (unconnected)
+
+`website/src/services/payment/providerSettlementScreen.ts` adds a pure
+pre-screen for *untrusted candidate* provider records: exact merchant,
+provider, order, buyer, INR paise, optional tax-quote hash, status policy,
+refunded/disputed state and previous payment assignment. **Every result is
+`NEEDS_REVIEW`, `paymentVerified=false` and `canFulfill=false`.** The
+successful candidate outcome is not a payment authorization. No provider
+API call, webhook, signature verifier, credential, database, bot fulfillment
+or production switch was added. The real provider-specific adapter and
+signed settlement integration are still unimplemented and required by #18.
+
+Read [2026-11-06 infrastructure snapshot](STAGING_READONLY_INVENTORY_2026_11_06.md)
+for fresh *read-only* worker/bot isolation evidence and remaining gates.
