@@ -5,17 +5,18 @@ on:
     branches: [main]
   pull_request:
 
+# No write token is required to run checkout tests or inspect dependencies.
 permissions:
   contents: read
 
 concurrency:
-  group: checkout-${{ github.ref }}
+  group: checkout-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   checkout:
-    timeout-minutes: 15
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -33,10 +34,8 @@ jobs:
           (cd frontend && bun install --frozen-lockfile)
       - name: Install Python test dependencies
         run: python -m pip install -r bot/requirements-ci.txt pip-audit==2.10.1 bandit==1.9.4
-      - name: Python dependency advisories and security analysis
-        run: |
-          python -m pip_audit -r bot/requirements-ci.txt
-          python -m bandit -r bot/avantas_checkout -ll
+      - name: Python client security analysis
+        run: python -m bandit -r bot/avantas_checkout -ll
       - name: Website tests and typecheck
         run: |
           (cd website && bun test && bun run typecheck)
@@ -46,23 +45,29 @@ jobs:
       - name: Frontend tests and typecheck
         run: |
           (cd frontend && bun test && bun run typecheck && bun run build)
+      - name: Audit installed Python dependencies
+        run: python -m pip_audit --local --progress-spinner off
+      - name: Audit resolved client and test requirements
+        run: python -m pip_audit -r bot/requirements-ci.txt --progress-spinner off
       - name: Audit JavaScript dependencies
         run: |
           (cd website && bun audit)
           (cd frontend && bun audit)
-      - name: Record tested revision and toolchain
+      - name: Report tested revision
         if: always()
         env:
           TESTED_SHA: ${{ github.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          TESTED_EVENT: ${{ github.event_name }}
         run: |
           {
-            echo "### Checkout validation provenance"
-            echo "Tested commit: $TESTED_SHA"
+            echo "### Aventas Pay checkout CI provenance"
+            echo "Commit: \`$TESTED_SHA\`"
             echo "PR head: $PR_HEAD_SHA"
-            echo "Bun: $(bun --version)"
-            echo "Node: $(node --version)"
+            echo "Event: \`$TESTED_EVENT\`"
             echo "Python: $(python --version)"
-            echo 'Lockfile SHA-256:'
+            echo "Node: $(node --version)"
+            echo "Bun: $(bun --version)"
             sha256sum website/bun.lock frontend/bun.lock bot/requirements-ci.txt
+            echo "Unit, typecheck, build and advisory outcomes are recorded in the steps above."
           } >> "$GITHUB_STEP_SUMMARY"
