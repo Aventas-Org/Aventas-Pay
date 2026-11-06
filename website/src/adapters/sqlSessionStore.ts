@@ -13,7 +13,7 @@
  * compare correctly for the range/point queries used here.
  */
 
-import { IdempotencyConflict } from "../domain/types";
+import { IdempotencyConflict, OrderAlreadyPaid } from "../domain/types";
 import type {
   CheckoutSession,
   SessionEvent,
@@ -29,7 +29,11 @@ INSERT INTO checkout_sessions (
   currency, payment_profile_id, upi_vpa, upi_display_name, status,
   idempotency_key, attempt, token_hash, source, provider_transaction_ref,
   created_at, updated_at, expires_at, paid_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+WHERE NOT EXISTS (
+  SELECT 1 FROM checkout_sessions
+  WHERE order_id = ? AND status = 'PAID'
+)
 `;
 
 const SESSION_COLUMNS = `
@@ -91,9 +95,11 @@ export class SqlSessionStore implements SessionStore {
       toDb(session.updatedAt),
       toDb(session.expiresAt),
       session.paidAt ? toDb(session.paidAt) : null,
+      session.orderId, // Atomic paid-order exclusion, after the existing 20 insert columns.
     ];
     try {
-      await this.db.run(INSERT_SESSION_SQL, params);
+      const { rowsAffected } = await this.db.run(INSERT_SESSION_SQL, params);
+      if (rowsAffected === 0) throw new OrderAlreadyPaid();
     } catch (err) {
       const violation = err instanceof ConstraintViolation ? err : null;
       if (violation?.unique) throw new IdempotencyConflict();
