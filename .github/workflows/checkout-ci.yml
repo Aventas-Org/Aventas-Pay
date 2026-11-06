@@ -5,18 +5,26 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: checkout-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   checkout:
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
       - name: Install website and frontend dependencies
@@ -24,7 +32,11 @@ jobs:
           (cd website && bun install --frozen-lockfile)
           (cd frontend && bun install --frozen-lockfile)
       - name: Install Python test dependencies
-        run: python -m pip install aiohttp pytest pytest-asyncio
+        run: python -m pip install -r bot/requirements-ci.txt pip-audit==2.10.1 bandit==1.9.4
+      - name: Python dependency advisories and security analysis
+        run: |
+          python -m pip_audit -r bot/requirements-ci.txt
+          python -m bandit -r bot/avantas_checkout -ll
       - name: Website tests and typecheck
         run: |
           (cd website && bun test && bun run typecheck)
@@ -38,3 +50,19 @@ jobs:
         run: |
           (cd website && bun audit)
           (cd frontend && bun audit)
+      - name: Record tested revision and toolchain
+        if: always()
+        env:
+          TESTED_SHA: ${{ github.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          {
+            echo "### Checkout validation provenance"
+            echo "Tested commit: $TESTED_SHA"
+            echo "PR head: $PR_HEAD_SHA"
+            echo "Bun: $(bun --version)"
+            echo "Node: $(node --version)"
+            echo "Python: $(python --version)"
+            echo 'Lockfile SHA-256:'
+            sha256sum website/bun.lock frontend/bun.lock bot/requirements-ci.txt
+          } >> "$GITHUB_STEP_SUMMARY"
