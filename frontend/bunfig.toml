@@ -1,2 +1,4 @@
 [test]
 preload = ["./test/dom-setup.ts"]
+# Baseline CI on 2026-11-06: 95.91% funcs, 99.07% lines.
+coverageThreshold = { lines = 0.90, functions = 0.80 }
