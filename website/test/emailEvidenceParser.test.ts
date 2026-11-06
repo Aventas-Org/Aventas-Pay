@@ -55,6 +55,18 @@ describe("untrusted bank-mail extraction (manual review only)", () => {
     },
   );
 
+  test("accepts a sentence-ending period after a valid exact INR amount", () => {
+    const parsed = parseUntrustedPaymentEmail({
+      ...fake,
+      subject: "Received ₹500.00.",
+      body: "Amount INR 600.00. RRN: 629401841605",
+    });
+    expect(parsed.reportedAmountPaise).toBeNull();
+    expect(parsed.warnings).toContain("CONFLICTING_AMOUNTS");
+    // Still review-only despite plausible bank-style wording.
+    expect(parsed.canFulfill).toBe(false);
+  });
+
   test("does not mistake any 12-digit customer/order ID for an RRN", () => {
     const parsed = parseUntrustedPaymentEmail({
       ...fake, subject: "Received ₹100", body: "Customer number 629401841605",
