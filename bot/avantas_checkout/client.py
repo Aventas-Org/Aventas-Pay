@@ -363,8 +363,7 @@ class CheckoutClient:
             raise CheckoutAuthError(f"rejected by website (status {status})")
         raise CheckoutApiError(status, code)
 
-    @staticmethod
-    def _parse_session_response(body: Any, order: OrderFacts) -> CheckoutSessionResult:
+    def _parse_session_response(self, body: Any, order: OrderFacts) -> CheckoutSessionResult:
         if not isinstance(body, dict):
             raise InvalidSessionResponse("create response is not an object")
         required = {
@@ -380,8 +379,10 @@ class CheckoutClient:
         if body["order_ref"] != order.order_id:
             raise InvalidSessionResponse("response order_ref does not match request")
         token = body["checkout_token"]
-        if len(token) < 32:
-            raise InvalidSessionResponse("checkout token too short")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", token):
+            raise InvalidSessionResponse("invalid checkout token")
+        if body["checkout_url"] != self.build_checkout_page_url(token):
+            raise InvalidSessionResponse("checkout URL does not match configured website origin")
         return CheckoutSessionResult(
             session_id=str(body.get("session_id", "")),
             order_id=body["order_ref"],

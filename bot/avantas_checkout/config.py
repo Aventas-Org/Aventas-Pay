@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from urllib.parse import urlsplit
 
 from .errors import CheckoutDisabled
 
@@ -47,6 +48,21 @@ def _lookup(
     return default
 
 
+def _checkout_origin(value: str) -> str:
+    """HTTPS origin only; plain HTTP is reserved for loopback integration tests."""
+    try:
+        p = urlsplit(value)
+        local_http = p.scheme == "http" and p.hostname in {"127.0.0.1", "localhost", "::1"}
+        if (any(c.isspace() for c in value) or any(c in value for c in "\\?#") or
+                p.username is not None or p.password is not None or
+                p.path not in {"", "/"} or not p.hostname or
+                (p.scheme != "https" and not local_http) or p.port == 0):
+            raise ValueError("invalid origin")
+        return value.rstrip("/")
+    except ValueError:
+        raise CheckoutDisabled("checkout URL must be an HTTPS origin without credentials, path, query or fragment") from None
+
+
 @dataclass(frozen=True)
 class CheckoutConfig:
     """Validated configuration for talking to the Aventas website."""
@@ -76,6 +92,9 @@ class CheckoutConfig:
             raise CheckoutDisabled(
                 "checkout enabled but configuration incomplete: " + ", ".join(problems)
             )
+
+        object.__setattr__(self, "base_url", _checkout_origin(self.base_url))
+        object.__setattr__(self, "api_url", _checkout_origin(self.api_url))
 
     @property
     def api_secret(self) -> str:
