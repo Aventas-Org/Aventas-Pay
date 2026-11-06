@@ -82,6 +82,53 @@ describe("untrusted bank-mail extraction (manual review only)", () => {
     expect(parsed.reportedRrn).toBeNull();
   });
 
+  test.each([
+    ["a space before the end-tag bracket", "</script >"],
+    ["a tab in the end tag", "</script\t>"],
+    ["a newline and mixed-case end tag", "</ScRiPt\n>"],
+    ["an end tag with an HTML parsing-error attribute", '</script foo="bar">'],
+  ])("discards script content with %s", (_scenario, closeTag) => {
+    const parsed = parseUntrustedPaymentEmail({
+      ...fake,
+      subject: "Account activity",
+      body: `<script type="text/javascript">Received INR 9999.99. RRN: 999888777666${closeTag}<p>Received INR 75.50. RRN: 629401841605</p>`,
+    });
+    expect(parsed.reportedAmountPaise).toBe(7550);
+    expect(parsed.reportedRrn).toBe("629401841605");
+    expect(parsed.warnings).not.toContain("CONFLICTING_AMOUNTS");
+    expect(parsed.warnings).not.toContain("CONFLICTING_REFERENCES");
+    expect(parsed.classification).toBe("NEEDS_REVIEW");
+    expect(parsed.canFulfill).toBe(false);
+  });
+
+  test.each(["</style >", "</STYLE\t>", '</style class="x">'])(
+    "discards non-rendered style content with %s", (closeTag) => {
+      const parsed = parseUntrustedPaymentEmail({
+        ...fake,
+        subject: "Account activity",
+        body: `<style>content: "INR 9999.99 RRN: 999888777666";${closeTag}<div>INR 75.50 RRN: 629401841605</div>`,
+      });
+      expect(parsed.reportedAmountPaise).toBe(7550);
+      expect(parsed.reportedRrn).toBe("629401841605");
+      expect(parsed.canFulfill).toBe(false);
+    },
+  );
+
+  test.each(["script", "style"])(
+    "drops an unclosed %s block through EOF rather than parsing hidden fake receipts", (tag) => {
+      const parsed = parseUntrustedPaymentEmail({
+        ...fake,
+        subject: "Account activity",
+        body: `<${tag}>INR 9999.99 RRN: 999888777666<p>INR 75.50 RRN: 629401841605</p>`,
+      });
+      expect(parsed.reportedAmountPaise).toBeNull();
+      expect(parsed.reportedRrn).toBeNull();
+      expect(parsed.warnings).toContain("MISSING_AMOUNT");
+      expect(parsed.warnings).toContain("MISSING_REFERENCE");
+      expect(parsed.paymentVerified).toBe(false);
+    },
+  );
+
   test("decodes UTF8 MIME subject and ignores script tags during extraction", () => {
     const parsed = parseUntrustedPaymentEmail({
       ...fake,
