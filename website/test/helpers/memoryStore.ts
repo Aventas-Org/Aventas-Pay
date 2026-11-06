@@ -8,6 +8,7 @@
 import {
   CheckoutSession,
   IdempotencyConflict,
+  OrderAlreadyPaid,
   SessionEvent,
   SessionStatus,
   SessionStore,
@@ -22,6 +23,9 @@ export class InMemorySessionStore implements SessionStore {
 
   async insertSession(session: CheckoutSession, tokenHash: string): Promise<void> {
     this.maybeFail();
+    if ([...this.sessions.values()].some(
+      (existing) => existing.orderId === session.orderId && existing.status === "PAID"
+    )) throw new OrderAlreadyPaid();
     for (const existing of this.sessions.values()) {
       if (
         existing.idempotencyKey === session.idempotencyKey &&
