@@ -127,6 +127,13 @@ async function createSessionImpl(
   const input = validated.value;
   const now = deps.clock.now();
 
+  // A successfully paid order may never create a fresh attempt, even when
+  // its prior session is terminal or the caller supplies a different key.
+  if (await deps.store.findPaidByOrderId(input.orderId)) {
+    logger.log("create_rejected", { reason: "order_already_paid", order_id: input.orderId });
+    throw conflict();
+  }
+
   // 4. Dedupe by order: an active session is reused, never duplicated.
   const activeForOrder = await deps.store.findActiveByOrderId(input.orderId, now);
   if (activeForOrder) {
