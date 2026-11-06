@@ -15,7 +15,7 @@
  * accepts amounts or recipients.
  */
 
-import { IdempotencyConflict, systemClock } from "../domain/types";
+import { IdempotencyConflict, OrderAlreadyPaid, systemClock } from "../domain/types";
 import type { CreateSessionRequest } from "../domain/validation";
 import type { CheckoutSession, Clock, SessionStore } from "../domain/types";
 import {
@@ -183,6 +183,10 @@ async function createSessionImpl(
   try {
     await deps.store.insertSession(session, tokenHash);
   } catch (err) {
+    if (err instanceof OrderAlreadyPaid) {
+      logger.log("create_rejected", { reason: "order_paid_during_insert", order_id: input.orderId });
+      throw conflict();
+    }
     if (err instanceof IdempotencyConflict) {
       // A concurrent request won the insert: return its active session.
       const winner = await deps.store.findLatestByIdempotencyKey(key);

@@ -261,6 +261,28 @@ describe("handleCreateSession — idempotency", () => {
     expect(store.sessions.size).toBe(1);
   });
 
+  test("paid-order race during insert is HTTP 409, not a new checkout URL", async () => {
+    const { deps, store, clock } = makeDeps();
+    const initial = await handleCreateSession(deps, makeRequest(validBody()));
+    expect(initial.status).toBe(201);
+    const existing = [...store.sessions.values()][0]!;
+    // Simulate an earlier read that observes no paid/active session, but
+    // payment verification commits immediately before the next INSERT.
+    store.findPaidByOrderId = async () => null;
+    store.findActiveByOrderId = async () => null;
+    store.findLatestByIdempotencyKey = async () => null;
+    const actualInsert = store.insertSession.bind(store);
+    store.insertSession = async (session, tokenHash) => {
+      await store.updateStatus(existing.id, "PENDING", "PAID", clock.now(), "trusted-ref");
+      return actualInsert(session, tokenHash);
+    };
+    const result = await handleCreateSession(deps, makeRequest(validBody()));
+    expect(result.status).toBe(409);
+    expect(JSON.parse(result.body).error.code).toBe("CONFLICT");
+    expect(result.body).not.toContain("checkout_url");
+    expect(store.sessions.size).toBe(1);
+  });
+
   test("after expiry a new attempt is created and gets a fresh token", async () => {
     const { deps, clock, store } = makeDeps();
     const first = await handleCreateSession(

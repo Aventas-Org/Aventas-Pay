@@ -95,6 +95,14 @@ export interface SessionStore {  /**
   appendEvent(event: SessionEvent): Promise<void>;
 }
 
+/** Atomic insert rejected an already-PAID order even if the earlier read raced. */
+export class OrderAlreadyPaid extends Error {
+  constructor() {
+    super("order already paid");
+    this.name = "OrderAlreadyPaid";
+  }
+}
+
 /** Thrown by SessionStore.insertSession when UNIQUE(idempotency_key, attempt) rejects. */
 export class IdempotencyConflict extends Error {
   constructor() {

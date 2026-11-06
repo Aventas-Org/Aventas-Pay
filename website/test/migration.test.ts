@@ -6,7 +6,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { SqlSessionStore } from "../src/adapters/sqlSessionStore";
-import { IdempotencyConflict } from "../src/domain/types";
+import { IdempotencyConflict, OrderAlreadyPaid } from "../src/domain/types";
 import { applyMigrations, migratedExecutor, openDatabase } from "./helpers/bunSqlite";
 
 const ROW = {
@@ -198,6 +198,45 @@ describe("0001_checkout_sessions.sql against real SQLite", () => {
 });
 
 describe("SqlSessionStore over real SQLite", () => {
+  test("atomic INSERT rejects a paid order even when pre-insert reads were stale", async () => {
+    const { executor, db } = migratedExecutor();
+    const store = new SqlSessionStore(executor);
+    insertRaw(db);
+    db.query(
+      "UPDATE checkout_sessions SET status = 'PAID', paid_at = ?, provider_transaction_ref = ? WHERE id = ?",
+    ).run(ROW.created_at, "trusted-opaque-ref", ROW.id);
+    const attempt = {
+      id: "attempt-2",
+      orderId: "AVT-1",
+      discordUserId: "123456789012345678",
+      productId: "vp-1000",
+      productName: "1000 VP",
+      amountPaise: 99900,
+      currency: "INR" as const,
+      paymentProfileId: "primary",
+      upi: { vpa: "merchant@upi", displayName: "Store" },
+      status: "PENDING" as const,
+      idempotencyKey: "AVT-1:new-attempt",
+      attempt: 1,
+      source: "discord_bot",
+      providerTransactionRef: null,
+      createdAt: new Date(ROW.created_at),
+      updatedAt: new Date(ROW.created_at),
+      expiresAt: new Date(ROW.expires_at),
+      paidAt: null,
+    };
+    await expect(store.insertSession(attempt, "new-token-hash"))
+      .rejects.toThrow(OrderAlreadyPaid);
+    const count = db.query(
+      "SELECT COUNT(*) AS count FROM checkout_sessions WHERE order_id = ?"
+    ).get("AVT-1") as { count: number };
+    expect(count.count).toBe(1);
+    const unrelated = { ...attempt, id: "other", orderId: "AVT-2",
+      idempotencyKey: "AVT-2:new-attempt" };
+    await expect(store.insertSession(unrelated, "unrelated-token-hash")).resolves.toBeUndefined();
+  });
+
+
   test("store raises IdempotencyConflict on duplicate (key, attempt)", async () => {
     const { executor } = migratedExecutor();
     const store = new SqlSessionStore(executor);
