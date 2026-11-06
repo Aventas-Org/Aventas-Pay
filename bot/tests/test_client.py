@@ -260,7 +260,7 @@ async def test_timeout_raises_checkout_timeout_after_bounded_attempts(server):
 
 async def test_unreachable_api_is_bounded_transport_failure():
     cfg = make_config(
-        "http://127.0.0.1:9/api",
+        "http://127.0.0.1:9",
         max_retries=1,
         connect_timeout_seconds=0.2,
         total_timeout_seconds=0.2,
@@ -391,3 +391,21 @@ async def test_status_paths_never_log_bearer_token(token, response_status, caplo
             assert "request_failed" in caplog.text
     finally:
         await runner.cleanup()
+
+
+@pytest.mark.parametrize("url", [
+    "https://attacker.example/checkout/" + TOKEN,
+    "https://avantas.example.attacker.example/checkout/" + TOKEN,
+    "https://avantas.example/checkout/" + TOKEN + "?redirect=evil",
+    "https://avantas.example/checkout/" + TOKEN + "#fragment",
+    "https://user:password@avantas.example/checkout/" + TOKEN,
+    "http://avantas.example/checkout/" + TOKEN,
+    "https://avantas.example/checkout/different-token",
+])
+async def test_unapproved_checkout_response_url_is_rejected(server, url):
+    payload = server._ok_payload()
+    payload["checkout_url"] = url
+    server._ok_payload = lambda: payload
+    async with CheckoutClient(make_config(server.url), sleep=no_sleep) as client:
+        with pytest.raises(InvalidSessionResponse):
+            await client.create_checkout_session(ORDER, PROFILE, actor_discord_id=ORDER.owner_discord_id)

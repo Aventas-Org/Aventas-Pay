@@ -122,3 +122,22 @@ def test_unprefixed_disabled_flag_is_honoured():
 def test_unprefixed_incomplete_config_still_fails_fast():
     with pytest.raises(CheckoutDisabled):
         CheckoutConfig.from_env({"CHECKOUT_ENABLED": "true"})
+
+
+@pytest.mark.parametrize("field", ["AVENTAS_WEBSITE_BASE_URL", "AVENTAS_PAYMENT_API_URL"])
+@pytest.mark.parametrize("url", [
+    "http://merchant.example", "https://user:password@merchant.example",
+    "https://merchant.example/api", "https://merchant.example?x=1",
+    "https://merchant.example#fragment", "//merchant.example", "file:///tmp/checkout",
+    "https://merchant.example\\evil", "https://merchant.example:invalid", "https://merchant.example:0",
+])
+def test_unsafe_checkout_origins_fail_closed_without_echoing_url(field, url):
+    with pytest.raises(CheckoutDisabled) as error:
+        CheckoutConfig.from_env(env(**{field: url}))
+    assert "password" not in str(error.value)
+    assert "merchant.example" not in str(error.value)
+
+
+def test_api_origin_trailing_slash_is_normalized():
+    cfg = CheckoutConfig.from_env(env(AVENTAS_PAYMENT_API_URL="https://avantas.example/"))
+    assert cfg.api_url == "https://avantas.example"
