@@ -33,10 +33,24 @@ _ENV_ALIASES: dict[str, str] = {
 }
 
 
+# An explicitly blank authoritative value must NEVER reactivate a legacy
+# checkout flag/secret/origin. Optional numeric knobs keep their old
+# empty-as-unspecified fallback to avoid changing operational defaults.
+_SECURITY_OVERRIDES = frozenset({
+    "AVENTAS_CHECKOUT_ENABLED",
+    "AVENTAS_WEBSITE_BASE_URL",
+    "AVENTAS_PAYMENT_API_URL",
+    "AVENTAS_PAYMENT_API_SECRET",
+})
+
+
 def _lookup(
     source: "dict[str, str] | os._Environ[str]", name: str, default: str = ""
 ) -> str:
-    """Reads name, falling back to the repo's unprefixed convention."""
+    """Read the prefixed value first, failing closed on explicit blank payment settings."""
+    if name in _SECURITY_OVERRIDES and name in source:
+        value = source[name]
+        return "" if value is None else str(value)
     value = source.get(name)
     if value is not None and str(value).strip() != "":
         return str(value)
@@ -109,9 +123,9 @@ class CheckoutConfig:
         elif raw_enabled in _TRUE:
             enabled = True
         else:
-            raise CheckoutDisabled(
-                f"checkout enable flag has unrecognized value {raw_enabled!r}"
-            )
+            # Environment values are untrusted and can contain copied secrets;
+            # never include them in exception text or operator alerts.
+            raise CheckoutDisabled("checkout enable flag has unrecognized value")
         base_url = _lookup(source, "AVENTAS_WEBSITE_BASE_URL").strip().rstrip("/")
         api_url = _lookup(source, "AVENTAS_PAYMENT_API_URL").strip()
         return cls(
