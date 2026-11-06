@@ -21,7 +21,7 @@ function future(seconds: number): string {
   return new Date(Date.now() + seconds * 1000).toISOString();
 }
 
-export type MockScenario = "pending" | "paid" | "expired" | "error" | "missing";
+export type MockScenario = "pending" | "paid" | "expired" | "cancelled" | "mismatch" | "error" | "missing";
 
 export function mockSnapshot(scenario: MockScenario): PublicSessionView | null {
   switch (scenario) {
@@ -34,6 +34,13 @@ export function mockSnapshot(scenario: MockScenario): PublicSessionView | null {
         ...base,
         expires_at: new Date(Date.now() - 60_000).toISOString(),
         status: "EXPIRED",
+      };
+    case "cancelled":
+      return { ...base, expires_at: future(1800), status: "CANCELLED" };
+    case "mismatch":
+      return {
+        ...base, expires_at: future(1800), status: "PENDING",
+        qr_payload: base.qr_payload.replace("am=999.00", "am=999.01"),
       };
     case "error":
     case "missing":
