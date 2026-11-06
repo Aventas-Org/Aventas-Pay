@@ -16,6 +16,13 @@ from .errors import CheckoutDisabled
 _TRUE = {"1", "true", "yes", "on"}
 _FALSE = {"0", "false", "no", "off", ""}
 
+# Presence, including an explicit blank, is authoritative for these settings.
+# Clearing a rollout flag, origin or credential must never revive an alias.
+_SECURITY_ENV = {
+    "AVENTAS_CHECKOUT_ENABLED", "AVENTAS_WEBSITE_BASE_URL",
+    "AVENTAS_PAYMENT_API_URL", "AVENTAS_PAYMENT_API_SECRET",
+}
+
 # The Aventas-bot repository's established .env convention is unprefixed names
 # (REVIEWS_CHANNEL_ID, PAYMENT_EMAIL_USER, ...). Stage 1 introduced the
 # AVENTAS_-prefixed names from the integration brief; both are accepted so the
@@ -36,8 +43,10 @@ _ENV_ALIASES: dict[str, str] = {
 def _lookup(
     source: "dict[str, str] | os._Environ[str]", name: str, default: str = ""
 ) -> str:
-    """Reads name, falling back to the repo's unprefixed convention."""
+    """Preserve critical overrides; optional tuning keeps legacy fallback."""
     value = source.get(name)
+    if name in _SECURITY_ENV and name in source:
+        return str(value) if value is not None and str(value).strip() else ""
     if value is not None and str(value).strip() != "":
         return str(value)
     alias = _ENV_ALIASES.get(name)
@@ -110,7 +119,7 @@ class CheckoutConfig:
             enabled = True
         else:
             raise CheckoutDisabled(
-                f"checkout enable flag has unrecognized value {raw_enabled!r}"
+                "checkout enable flag has unrecognized value"
             )
         base_url = _lookup(source, "AVENTAS_WEBSITE_BASE_URL").strip().rstrip("/")
         api_url = _lookup(source, "AVENTAS_PAYMENT_API_URL").strip()
