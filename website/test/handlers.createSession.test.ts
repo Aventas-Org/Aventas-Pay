@@ -245,6 +245,22 @@ describe("handleCreateSession — idempotency", () => {
     expect(store.sessions.size).toBe(1);
   });
 
+  test("paid orders cannot create new sessions, even with another idempotency key", async () => {
+    const { deps, store, clock } = makeDeps();
+    const first = await handleCreateSession(deps, makeRequest(validBody()));
+    expect(first.status).toBe(201);
+    const existing = await store.findActiveByOrderId("AVT-2026-000123", clock.now());
+    expect(existing).not.toBeNull();
+    expect(await store.updateStatus(existing!.id, "PENDING", "PAID", clock.now(), "receipt-1234")).toBe(true);
+    for (const changes of [{}, { idempotency_key: "different-retry-key" }]) {
+      const retry = await handleCreateSession(deps, makeRequest(validBody(changes)));
+      expect(retry.status).toBe(409);
+      expect(JSON.parse(retry.body).error.code).toBe("CONFLICT");
+      expect(retry.body).not.toContain("checkout_url");
+    }
+    expect(store.sessions.size).toBe(1);
+  });
+
   test("after expiry a new attempt is created and gets a fresh token", async () => {
     const { deps, clock, store } = makeDeps();
     const first = await handleCreateSession(
