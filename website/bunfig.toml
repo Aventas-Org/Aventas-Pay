@@ -1,0 +1,5 @@
+# Coverage floor measured from 2026-11-06 CI: 97.40% functions, 99.33% lines.
+# Per-file thresholds allow room for optional error paths while preventing
+# silent erosion of the checkout API's exercised security contracts.
+[test]
+coverageThreshold = { lines = 0.90, functions = 0.75 }
