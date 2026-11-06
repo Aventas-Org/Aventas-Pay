@@ -36,7 +36,7 @@ export interface UntrustedPaymentEvidence {
 const MAX_BODY = 16_384;
 const MAX_SUBJECT = 512;
 const MAX_FROM = 512;
-const AMOUNT = /(?:₹|\bINR\b|\bRs\.?)\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)(?![\d.])/gi;
+const AMOUNT = /(?:₹|\bINR\b|\bRs\.?)\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)(?!\d|\.\d)/gi;
 const RRN = /\b(?:RRN|UTR|UPI\s*Ref(?:erence)?(?:\s*(?:No|Number))?|Transaction\s*(?:ID|Ref(?:erence)?))\s*[:#.-]?\s*(\d{12})(?!\d)/gi;
 
 function parsePaise(text: string): number | null {
