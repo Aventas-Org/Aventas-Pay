@@ -126,7 +126,13 @@ export async function recordTrustedPayment(
     // Concurrent transition: surface current state rather than overwriting it.
     const current = await store.findById(sessionId);
     if (!current) throw new Error("session not found");
-    return current;
+    // A concurrent trusted verifier can win with the *same* receipt.
+    // Any other outcome (cancellation, expiry, or a different receipt)
+    // is a conflict, not a successful payment acknowledgement.
+    if (current.status === "PAID" && current.providerTransactionRef === providerTransactionRef) {
+      return current;
+    }
+    throw new IllegalTransition(current.status, "PAID");
   }
   await store.appendEvent({
     sessionId,
