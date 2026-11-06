@@ -128,6 +128,16 @@ export class SqlSessionStore implements SessionStore {
     return row ? fromDb(row) : null;
   }
 
+  async findPaidByOrderId(orderId: string): Promise<CheckoutSession | null> {
+    const row = await this.db.get<SessionRow>(
+      `SELECT ${SESSION_COLUMNS} FROM checkout_sessions
+       WHERE order_id = ? AND status = 'PAID'
+       ORDER BY paid_at DESC LIMIT 1`,
+      [orderId],
+    );
+    return row ? fromDb(row) : null;
+  }
+
   async findLatestByIdempotencyKey(key: string): Promise<CheckoutSession | null> {
     const row = await this.db.get<SessionRow>(
       `SELECT ${SESSION_COLUMNS} FROM checkout_sessions
