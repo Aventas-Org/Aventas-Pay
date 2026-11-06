@@ -7,7 +7,7 @@ import { handleCreateSession, CreateSessionDeps } from "../src/handlers/createSe
 import { handleSessionStatus } from "../src/handlers/sessionStatus";
 import { InMemoryRateLimiter } from "../src/domain/rateLimit";
 import { capturingLogger, redact } from "../src/domain/log";
-import { MAX_BODY_BYTES } from "../src/handlers/http";
+import { MAX_BODY_BYTES, dispatch } from "../src/handlers/http";
 import { InMemorySessionStore } from "./helpers/memoryStore";
 
 const BOT_SECRET = "bot-secret-at-least-16-characters";
@@ -93,6 +93,30 @@ describe("request-size limits", () => {
       bodyText: text,
     });
     expect(res.status).toBe(201);
+  });
+});
+
+describe("unexpected error secrecy", () => {
+  test("arbitrary database error text and overridden names never reach logs or client", async () => {
+    const logger = capturingLogger();
+    const injected = new Error(
+      "Database failed: Authorization Bearer secret-short-123, " +
+      "UPI merchant@upi, user 123456789012345678, " +
+      "checkout token xyzabC12-opaque-sample"
+    );
+    injected.name = "AuthSecretLeak";
+    const response = await dispatch(async () => { throw injected; }, logger);
+    expect(response.status).toBe(500);
+    expect(JSON.parse(response.body).error.code).toBe("INTERNAL_ERROR");
+    const allLogs = JSON.stringify(logger.events);
+    expect(allLogs).toContain("internal_error");
+    expect(allLogs).toContain('"error_name":"Error"');
+    for (const secret of ["secret-short-123", "merchant@upi", "123456789012345678",
+      "xyzabC12-opaque-sample", "AuthSecretLeak"]) {
+      expect(allLogs).not.toContain(secret);
+      expect(response.body).not.toContain(secret);
+    }
+    expect(allLogs).not.toContain("error_message");
   });
 });
 
