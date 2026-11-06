@@ -1,0 +1,977 @@
+/* AventasPay - Unified Motion System (Round 4)
+   Rules:
+   - Animate ONLY transform, opacity, stroke-dashoffset, and progress bar widths.
+   - Respect prefers-reduced-motion: reduce
+   - Pause infinite animations when document.hidden or offscreen
+*/
+
+:root {
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-fast: 150ms;
+  --dur: 280ms;
+  --dur-slow: 600ms;
+}
+
+/* ============================================================
+   A1: Logo draw-in & Wordmark stagger
+   ============================================================ */
+.motion-av-draw polygon,
+.motion-av-draw path {
+  fill-opacity: 0;
+  stroke-width: 5;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  stroke-linejoin: round;
+  animation: avDraw 1.3s var(--ease-out) forwards, avFillin 0.6s 1s forwards;
+}
+
+@keyframes avDraw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes avFillin {
+  to {
+    fill-opacity: 1;
+  }
+}
+
+.motion-wm-char {
+  display: inline-block;
+  opacity: 0;
+  transform: translateY(8px);
+  animation: wmUp 0.45s var(--ease-out) forwards;
+  animation-delay: calc(var(--char-i, 0) * 45ms + 600ms);
+}
+
+@keyframes wmUp {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ============================================================
+   A2: Hazard Stripe March
+   ============================================================ */
+.motion-hazard {
+  height: 4px;
+  background: repeating-linear-gradient(135deg, var(--warn) 0 8px, #0A0A0B 8px 16px);
+  background-size: 22.63px 22.63px;
+  animation: hazardMarch 12s linear infinite;
+  will-change: background-position;
+}
+
+@keyframes hazardMarch {
+  to {
+    background-position: 22.63px 0;
+  }
+}
+
+body.tab-hidden .motion-hazard,
+.motion-hazard.paused {
+  animation-play-state: paused;
+}
+
+/* ============================================================
+   A3: Card Spotlight
+   ============================================================ */
+@media (hover: hover) {
+  .motion-card-spotlight {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .motion-card-spotlight::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s var(--ease-out);
+    background: radial-gradient(280px circle at var(--mx, 50%) var(--my, 50%), rgba(233, 230, 223, 0.07), transparent 70%);
+    z-index: 1;
+  }
+
+  .motion-card-spotlight:hover::before {
+    opacity: 1;
+  }
+}
+
+/* ============================================================
+   A4: Sign-in button pop, spinner, error shake
+   ============================================================ */
+.motion-btn-pop {
+  animation: btnSpringPop 0.4s var(--ease-spring);
+}
+
+@keyframes btnSpringPop {
+  0% { transform: scale(0.96); }
+  60% { transform: scale(1.04); }
+  100% { transform: scale(1); }
+}
+
+.motion-shake {
+  animation: horizontalShake 0.4s var(--ease-out);
+}
+
+@keyframes horizontalShake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-8px); }
+  40% { transform: translateX(7px); }
+  60% { transform: translateX(-5px); }
+  80% { transform: translateX(3px); }
+}
+
+.motion-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spinRot 0.7s linear infinite;
+  display: inline-block;
+}
+
+@keyframes spinRot {
+  to { transform: rotate(360deg); }
+}
+
+/* ============================================================
+   A5: Sliding active sidebar nav indicator
+   ============================================================ */
+.nav-sliding-container {
+  position: relative;
+}
+
+#navSlidingIndicator {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 38px;
+  border-radius: 8px;
+  background: var(--raised);
+  pointer-events: none;
+  transition: transform 0.35s var(--ease-spring), opacity 0.2s var(--ease-out);
+  z-index: 0;
+}
+
+#navSlidingIndicator::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 9px;
+  bottom: 9px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+/* ============================================================
+   A6: Sidebar Collapse
+   ============================================================ */
+.sidebar-collapsible {
+  transition: width 0.35s var(--ease-out);
+}
+
+.sidebar-label {
+  transition: opacity 0.2s var(--ease-out), transform 0.2s var(--ease-out);
+  white-space: nowrap;
+}
+
+.sidebar-collapsed .sidebar-label {
+  opacity: 0;
+  transform: translateX(-4px);
+  pointer-events: none;
+}
+
+/* ============================================================
+   A7: Page Enter Stagger
+   ============================================================ */
+.motion-page-enter > * {
+  animation: pageFadeUp 0.45s var(--ease-out) backwards;
+  animation-delay: calc(var(--item-i, 0) * 40ms);
+}
+
+@keyframes pageFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ============================================================
+   A8: Stat number count-up & value flash
+   ============================================================ */
+.motion-num {
+  font-variant-numeric: tabular-nums;
+  display: inline-block;
+}
+
+.motion-vflash {
+  animation: valFlash 0.6s var(--ease-out);
+}
+
+@keyframes valFlash {
+  0% {
+    color: var(--accent);
+    text-shadow: 0 0 16px rgba(125, 211, 252, 0.6);
+  }
+  100% {
+    color: inherit;
+    text-shadow: none;
+  }
+}
+
+/* ============================================================
+   A9: Bar chart grow & morph & tooltip
+   ============================================================ */
+.motion-bar-col {
+  transition: height 0.6s var(--ease-out);
+  transform-origin: bottom;
+}
+
+.motion-bar-col:hover {
+  filter: brightness(1.15);
+  transform: scaleX(1.05);
+}
+
+.motion-chart-tooltip {
+  transition: opacity 0.18s var(--ease-out), transform 0.18s var(--ease-out);
+  pointer-events: none;
+}
+
+/* ============================================================
+   A10: Donut draw-in via stroke-dashoffset
+   ============================================================ */
+.motion-donut-seg {
+  transition: stroke-dasharray 0.8s var(--ease-out), stroke-dashoffset 0.8s var(--ease-out);
+}
+
+/* ============================================================
+   A11: Live feed slide-in from top
+   ============================================================ */
+.motion-feed-item {
+  animation: feedSlideIn 0.5s var(--ease-out) backwards;
+  overflow: hidden;
+}
+
+.motion-feed-item.new-arrival {
+  animation: feedSlideIn 0.5s var(--ease-out), arrivalFlash 1.6s var(--ease-out);
+}
+
+@keyframes feedSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    max-height: 90px;
+  }
+}
+
+@keyframes arrivalFlash {
+  0% {
+    background: rgba(125, 211, 252, 0.18);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+/* ============================================================
+   A12: Status dots pulse (Pending only)
+   ============================================================ */
+/* One dot per badge: when a badge hosts a .motion-pulse-dot, hide the
+   badge's own ::before dot so we never render two. */
+.badge:has(> .motion-pulse-dot)::before,
+.badge:has(.motion-pulse-dot)::before {
+  display: none;
+}
+
+.motion-pulse-dot {
+  position: relative;
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.motion-pulse-dot.pulse::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: 50%;
+  background: inherit;
+  animation: dotPing 1.8s infinite;
+}
+
+body.tab-hidden .motion-pulse-dot.pulse::after {
+  animation-play-state: paused;
+}
+
+@keyframes dotPing {
+  0% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(3.2);
+    opacity: 0;
+  }
+}
+
+/* ============================================================
+   A13: Segmented Controls Sliding Pill
+   ============================================================ */
+.motion-seg-wrap {
+  position: relative;
+  display: inline-flex;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 3px;
+  align-items: center;
+}
+
+.motion-seg-pill {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 0;
+  border-radius: 7px;
+  background: var(--raised);
+  box-shadow: 0 0 0 1px var(--border);
+  transition: transform 0.25s var(--ease-out), width 0.25s var(--ease-out);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.motion-seg-btn {
+  position: relative;
+  z-index: 1;
+  background: none;
+  border: 0;
+  padding: 6px 14px;
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 12.5px;
+  transition: color 0.2s var(--ease-out);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.motion-seg-btn.active {
+  color: var(--bone);
+}
+
+/* ============================================================
+   A14: Table rows stagger, hover accent edge, selected row
+   ============================================================ */
+.motion-tbl-row {
+  position: relative;
+  transition: background 0.18s var(--ease-out), box-shadow 0.18s var(--ease-out);
+  animation: tableRowFadeIn 0.45s var(--ease-out) backwards;
+  animation-delay: calc(var(--row-i, 0) * 30ms);
+}
+
+.motion-tbl-row:hover {
+  background: rgba(255, 255, 255, 0.035);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.motion-tbl-row.selected {
+  background: var(--raised);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.motion-tbl-row.fresh-update {
+  animation: tableRowFadeIn 0.45s var(--ease-out), arrivalFlash 1.6s var(--ease-out);
+}
+
+@keyframes tableRowFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ============================================================
+   A15: Drawer slide-in from right with scrim blur
+   ============================================================ */
+.motion-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.32s var(--ease-out);
+  z-index: 90;
+}
+
+.motion-scrim.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.motion-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(440px, 100vw);
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  transform: translateX(100%);
+  transition: transform 0.32s var(--ease-out);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -24px 0 48px -12px rgba(0, 0, 0, 0.7);
+}
+
+.motion-drawer.open {
+  transform: translateX(0);
+}
+
+/* ============================================================
+   A16: Step-by-step Timeline Fill inside Drawer
+   ============================================================ */
+.motion-tl-step {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  gap: 12px;
+  position: relative;
+  padding-bottom: 20px;
+}
+
+.motion-tl-step:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 22px;
+  bottom: 0;
+  width: 2px;
+  background: var(--border);
+}
+
+.motion-tl-step.done:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 22px;
+  bottom: 0;
+  width: 2px;
+  background: var(--ok);
+  transform-origin: top;
+  transform: scaleY(0);
+  animation: lineGrow 0.35s var(--step-delay, 0.4s) var(--ease-out) forwards;
+}
+
+@keyframes lineGrow {
+  to { transform: scaleY(1); }
+}
+
+.motion-tl-dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  display: grid;
+  place-items: center;
+  background: var(--surface);
+  position: relative;
+  z-index: 1;
+}
+
+.motion-tl-step.done .motion-tl-dot {
+  background: var(--ok);
+  border-color: var(--ok);
+  color: #04130a;
+  transform: scale(0);
+  animation: dotPop 0.35s var(--step-delay, 0.4s) var(--ease-spring) forwards;
+}
+
+@keyframes dotPop {
+  0% { transform: scale(0); }
+  70% { transform: scale(1.25); }
+  100% { transform: scale(1); }
+}
+
+.motion-tl-step.cur .motion-tl-dot {
+  border-color: var(--warn);
+}
+
+.motion-tl-step.cur .motion-tl-dot::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 2px solid var(--warn);
+  animation: ringPing 1.8s infinite;
+}
+
+@keyframes ringPing {
+  0% { transform: scale(1); opacity: 0.7; }
+  100% { transform: scale(1.7); opacity: 0; }
+}
+
+body.tab-hidden .motion-tl-step.cur .motion-tl-dot::after {
+  animation-play-state: paused;
+}
+
+/* ============================================================
+   A17: Chat typing indicator & bubble pop-in
+   ============================================================ */
+.motion-chat-bubble {
+  animation: bubblePop 0.35s var(--ease-spring);
+}
+
+@keyframes bubblePop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.motion-typing-indicator {
+  display: inline-flex;
+  gap: 4px;
+  padding: 10px 14px;
+}
+
+.motion-typing-indicator i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+  animation: typingBounce 1.1s infinite;
+}
+
+.motion-typing-indicator i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.motion-typing-indicator i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes typingBounce {
+  0%, 60%, 100% {
+    transform: none;
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-5px);
+    opacity: 1;
+  }
+}
+
+/* ============================================================
+   A18: UTR Mismatch warning drop & shake
+   ============================================================ */
+.motion-warn-banner {
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  background: rgba(239, 68, 68, 0.08);
+  border-radius: 10px;
+  padding: 12px 14px;
+  animation: bannerDrop 0.4s var(--ease-spring), horizontalShake 0.45s 0.45s, warnGlow 2.4s 1s infinite;
+}
+
+@keyframes bannerDrop {
+  from {
+    opacity: 0;
+    transform: translateY(-16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes warnGlow {
+  50% {
+    box-shadow: 0 0 0 5px rgba(239, 68, 68, 0.15);
+  }
+}
+
+/* ============================================================
+   A19: QR Diagonal Wave Reveal & Scan Line Sweep
+   ============================================================ */
+.motion-qr-wrap {
+  position: relative;
+  overflow: hidden;
+  border-radius: 14px;
+}
+
+.motion-scan-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  top: 0;
+  background: var(--accent);
+  box-shadow: 0 0 12px 1px rgba(125, 211, 252, 0.55);
+  pointer-events: none;
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: scanLineSweep 3.2s 1.2s ease-in-out infinite;
+}
+
+body.tab-hidden .motion-scan-line {
+  animation-play-state: paused;
+}
+
+@keyframes scanLineSweep {
+  0% { transform: translateY(0); opacity: 0; }
+  12% { opacity: 1; }
+  88% { opacity: 1; }
+  100% { transform: translateY(var(--qr-h, 240px)); opacity: 0; }
+}
+
+/* ============================================================
+   A20: Countdown progress bar shrinking & critical pulse
+   ============================================================ */
+.motion-countdown-bar {
+  height: 4px;
+  border-radius: 4px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.motion-countdown-bar i {
+  display: block;
+  height: 100%;
+  background: var(--warn);
+  width: 100%;
+  transition: width 1s linear, background 0.4s;
+}
+
+.motion-countdown-bar.critical i {
+  background: var(--bad);
+}
+
+.motion-countdown-digits.critical {
+  color: var(--bad);
+  animation: digitsBlink 1s infinite;
+}
+
+@keyframes digitsBlink {
+  50% { opacity: 0.55; }
+}
+
+/* ============================================================
+   A21: Success checkmark draw & particle burst
+   ============================================================ */
+.motion-success-mark {
+  width: 80px;
+  height: 80px;
+  margin: 4px auto 0;
+  position: relative;
+}
+
+.motion-success-mark svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  position: relative;
+  z-index: 1;
+}
+
+.motion-success-ring {
+  fill: rgba(34, 197, 94, 0.1);
+  stroke: var(--ok);
+  stroke-width: 2.5;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: avDraw 0.65s var(--ease-out) forwards;
+}
+
+.motion-success-tick {
+  fill: none;
+  stroke: var(--ok);
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: avDraw 0.45s 0.5s var(--ease-out) forwards;
+}
+
+.motion-success-mark::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid var(--ok);
+  opacity: 0;
+  animation: waveOut 1s 0.5s ease-out forwards;
+}
+
+@keyframes waveOut {
+  0% { transform: scale(0.8); opacity: 0.8; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+
+.motion-particle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px;
+  border-radius: 50%;
+  background: var(--bone);
+  opacity: 0;
+  pointer-events: none;
+  animation: burstParticle 0.85s 0.5s ease-out forwards;
+}
+
+.motion-particle:nth-child(odd) {
+  background: var(--ok);
+}
+
+@keyframes burstParticle {
+  0% { opacity: 1; transform: translate(0, 0) scale(1); }
+  100% { opacity: 0; transform: translate(var(--tx), var(--ty)) scale(0.25); }
+}
+
+/* ============================================================
+   A22: Expired clock shake & QR dim
+   ============================================================ */
+.motion-expired-clock {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  display: grid;
+  place-items: center;
+  margin: 6px auto;
+  color: var(--bad);
+  animation: horizontalShake 0.6s 0.2s;
+}
+
+.motion-qr-dimmed {
+  opacity: 0.35;
+  filter: blur(2px);
+  transition: opacity 0.5s var(--ease-out), filter 0.5s var(--ease-out);
+}
+
+/* ============================================================
+   A23: Toasts stack bottom-right (bottom-center on mobile)
+   ============================================================ */
+#motionToastContainer {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 400;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  pointer-events: none;
+}
+
+@media (max-width: 640px) {
+  #motionToastContainer {
+    right: 16px;
+    left: 16px;
+    bottom: 16px;
+    align-items: center;
+  }
+}
+
+.motion-toast {
+  pointer-events: auto;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-width: 240px;
+  max-width: 380px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 14px 34px -10px rgba(0, 0, 0, 0.85);
+  font-size: 13px;
+  color: var(--bone);
+  animation: toastSlideUp 0.35s var(--ease-spring);
+  cursor: pointer;
+}
+
+@keyframes toastSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.motion-toast.toast-dismissing {
+  animation: toastSlideDown 0.25s var(--ease-out) forwards;
+}
+
+@keyframes toastSlideDown {
+  to {
+    opacity: 0;
+    transform: translateY(16px) scale(0.94);
+  }
+}
+
+.motion-toast::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--accent);
+  width: 100%;
+  animation: toastProgress 4s linear forwards;
+}
+
+@keyframes toastProgress {
+  from { width: 100%; }
+  to { width: 0; }
+}
+
+/* ============================================================
+   A24: Settings toggles & sticky Unsaved changes bar
+   ============================================================ */
+.motion-toggle {
+  width: 44px;
+  height: 24px;
+  border-radius: 99px;
+  background: var(--border);
+  border: 0;
+  position: relative;
+  transition: background 0.3s;
+  cursor: pointer;
+  padding: 0;
+  flex: none;
+}
+
+.motion-toggle i {
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform 0.35s var(--ease-spring), background 0.3s;
+}
+
+.motion-toggle[aria-checked="true"] {
+  background: var(--bone);
+}
+
+.motion-toggle[aria-checked="true"] i {
+  transform: translateX(20px);
+  background: #0A0A0B;
+}
+
+#motionSaveBar {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translate(-50%, 160%);
+  transition: transform 0.5s var(--ease-spring);
+  z-index: 120;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 14px 10px 18px;
+  box-shadow: 0 20px 50px -10px rgba(0, 0, 0, 0.8);
+}
+
+#motionSaveBar.visible {
+  transform: translate(-50%, 0);
+}
+
+/* ============================================================
+   A25: Back to merchant button fill sweep
+   ============================================================ */
+.motion-btn-fill {
+  position: relative;
+  overflow: hidden;
+}
+
+.motion-btn-fill::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.18);
+  transform-origin: left;
+  transform: scaleX(0);
+  animation: fillSweep 5s linear forwards;
+}
+
+@keyframes fillSweep {
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.motion-btn-fill span {
+  position: relative;
+  z-index: 1;
+}
+
+/* ============================================================
+   Reduced Motion: Complete Instant Reset
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+
+/* Refresh/loader icons used across pages (className="spin") */
+.spin { animation: spinRot 0.8s linear infinite; }
+
+/* Demo-style QR: per-module wave-in (diagonal), pop-in card, logo pop, scan glow */
+.qr-svg { display: block; width: 224px; height: 224px; }
+.qr-svg rect { opacity: 0; transform-box: fill-box; transform-origin: center; animation: qrIn .5s cubic-bezier(.22,1,.36,1) forwards; }
+.co-qrlogo span { animation: qrPop .6s 1.3s cubic-bezier(.34,1.56,.64,1) backwards; }
+@keyframes qrIn { from { opacity: 0; transform: scale(0); } to { opacity: 1; transform: scale(1); } }
+@keyframes qrPop { from { opacity: 0; transform: scale(.8); } to { opacity: 1; transform: scale(1); } }
+.motion-scan-line { height: 50px !important; top: -50px !important; background: linear-gradient(to bottom, transparent, rgba(125,211,252,.4)) !important; border-bottom: 2px solid var(--accent); box-shadow: none !important; animation: qrScan 2.8s 1.8s ease-in-out infinite !important; }
+@keyframes qrScan { 0% { top: -50px; opacity: 1; } 100% { top: 100%; opacity: 1; } }
+@media (max-width: 480px) { .qr-svg { width: 200px; height: 200px; } }
+@media (prefers-reduced-motion: reduce) { .qr-svg rect, .co-qrbox, .co-qrlogo span { animation: none !important; opacity: 1; } .motion-scan-line { display: none; } }

@@ -1,0 +1,33 @@
+name: Checkout integration
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checkout:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install website and frontend dependencies
+        run: |
+          (cd website && bun install --frozen-lockfile)
+          (cd frontend && bun install --frozen-lockfile)
+      - name: Install Python test dependencies
+        run: python -m pip install aiohttp pytest pytest-asyncio
+      - name: Website tests and typecheck
+        run: |
+          (cd website && bun test && bun run typecheck)
+      - name: Bot and cross-system tests
+        run: |
+          (cd bot && python -m pytest -q)
+      - name: Frontend tests and typecheck
+        run: |
+          (cd frontend && bun test && bun run typecheck)

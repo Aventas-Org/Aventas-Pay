@@ -1,0 +1,26 @@
+@import "./fonts.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background-color: #0A0A0B;
+  background-image: radial-gradient(circle at 1px 1px, rgba(233, 230, 223, 0.035) 1px, transparent 0);
+  background-size: 24px 24px;
+  color: #E9E6DF;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Accessibility focus rings */
+:focus-visible {
+  outline: 2px solid var(--accent, #7DD3FC) !important;
+  outline-offset: 2px !important;
+}
