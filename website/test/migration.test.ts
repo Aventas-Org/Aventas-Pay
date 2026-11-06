@@ -201,11 +201,10 @@ describe("SqlSessionStore over real SQLite", () => {
   test("atomic INSERT rejects a paid order even when pre-insert reads were stale", async () => {
     const { executor, db } = migratedExecutor();
     const store = new SqlSessionStore(executor);
-    insertRaw(db, {
-      status: "PAID",
-      paid_at: ROW.created_at,
-      provider_transaction_ref: "trusted-opaque-ref",
-    });
+    insertRaw(db);
+    db.query(
+      "UPDATE checkout_sessions SET status = 'PAID', paid_at = ?, provider_transaction_ref = ? WHERE id = ?",
+    ).run(ROW.created_at, "trusted-opaque-ref", ROW.id);
     const attempt = {
       id: "attempt-2",
       orderId: "AVT-1",
