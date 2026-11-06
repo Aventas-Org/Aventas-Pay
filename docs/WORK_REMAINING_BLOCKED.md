@@ -5,6 +5,29 @@ GitHub CI do not replace staging payment acceptance or live infrastructure
 verification. This is a read-only status snapshot and operator checklist,
 not approval to mutate Cloudflare or production payment settings.
 
+## Latest engineering update (2026-11-06)
+
+Pay #24/#28/#29/#30, website #154/#157/#158 and bot #37/#38 are merged
+after their head CI passed: safe exception logs, HTTP redirect/token-path
+protection, safe UI/expiry behavior, patched frontend dependencies, exact
+22-file vendor parity, and explicit checkout-origin binding. The older audit
+below is historical; references to #5/#151/#152 being unmerged are superseded.
+
+Latest local validation: Pay API 141 passed, Pay bot 92 passed, frontend 44
+passed with typecheck/build, bot 180 passed plus 7 subtests and 101 unittest
+checks. JavaScript package audits and bot requirements audit reported no known
+vulnerabilities. These are local/CI results, not live payment acceptance.
+
+Fresh Railway read confirmed only `production` in Aventas Shop, a mounted
+`/data` volume, successful bot #37 deployment and Discord gateway/online logs.
+No checkout, payment API or Slice auto-approval variable names were present.
+That establishes default-off configuration by code defaults, not a staging
+test. Cloudflare access and isolated payment bot/guild remain unavailable.
+Keep #8–#10/#15–#23 open until their remaining evidence and approvals exist.
+
+See [current source of truth](INTEGRATION_MAP_AND_SOURCE_OF_TRUTH.md) and
+[operator procedure pending adoption](PAYMENT_OPERATIONS_RUNBOOK.md).
+
 ## Verified repository / platform state
 
 - Pay [PR #3](https://github.com/Aventas-Org/Aventas-Pay/pull/3)
@@ -63,7 +86,7 @@ not approval to mutate Cloudflare or production payment settings.
    the bot and receipt pipeline. With fake funds and synthetic receipts, prove exact
    persisted post-wallet order amount equals UPI snapshot/QR; no customer
    click, screenshot, redirect or polling can mark PAID; trusted staff or
-   uniquely matched Slice verification can. Replays with changed facts
+   staff verification after independently confirming funds can. Replays with changed facts
    must return 409, identical retries must return the same URL, and one
    receipt must never verify two orders.
 4. **Reliability:** test expiration, cancellation, network timeout,
