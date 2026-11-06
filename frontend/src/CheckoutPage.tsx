@@ -8,7 +8,7 @@ import {
 import { formatInr, PublicSessionView, verifyQrMatchesSession } from "./lib/qr";
 import { mockSnapshot, MockScenario } from "./mockApi";
 
-type UiPhase = "loading" | "awaiting" | "confirmed" | "expired" | "unavailable";
+type UiPhase = "loading" | "awaiting" | "confirmed" | "expired" | "cancelled" | "unavailable";
 
 interface Props {
   token: string;
@@ -34,7 +34,8 @@ export function CheckoutPage({ token, mock }: Props) {
   const applySession = useCallback((next: PublicSessionView) => {
     setSession(next);
     if (next.status === "PAID") setPhase("confirmed");
-    else if (next.status === "EXPIRED" || next.status === "CANCELLED") setPhase("expired");
+    else if (next.status === "EXPIRED") setPhase("expired");
+    else if (next.status === "CANCELLED") setPhase("cancelled");
     else setPhase("awaiting");
   }, []);
 
@@ -114,7 +115,7 @@ export function CheckoutPage({ token, mock }: Props) {
   // against the stored session details first.
   useEffect(() => {
     let cancelled = false;
-    if (!session) {
+    if (!session || phase !== "awaiting") {
       setQrDataUrl(null);
       return;
     }
@@ -138,10 +139,17 @@ export function CheckoutPage({ token, mock }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [session]);
+  }, [session, phase]);
 
   const copyUpi = useCallback(async () => {
-    if (!session) return;
+    // Public status may become stale while the site is unreachable. Never copy
+    // payment details unless the latest snapshot and QR agree exactly.
+    if (!session || phase !== "awaiting" ||
+        (pollerState?.consecutiveFailures ?? 0) > 0 ||
+        !verifyQrMatchesSession(session)) {
+      setCopyMessage("Payment instructions cannot be verified. Do not transfer money.");
+      return;
+    }
     const vpa = session.upi.vpa;
     try {
       if (navigator.clipboard?.writeText) {
@@ -171,7 +179,7 @@ export function CheckoutPage({ token, mock }: Props) {
       setCopyMessage("Copy failed — please select the UPI ID manually");
       setTimeout(() => setCopyMessage(null), 4000);
     }
-  }, [session]);
+  }, [session, phase, pollerState]);
 
   const retry = useCallback(() => setRetryNonce((n) => n + 1), []);
 
@@ -248,9 +256,10 @@ function UnavailableCard({ onRetry }: { onRetry: () => void }) {
         Checkout is temporarily unavailable
       </h2>
       <p className="mt-2 text-sm leading-relaxed text-avantas-muted">
-        We couldn&apos;t reach the payment service. This is usually brief — your order is safe and
-        no payment has been taken. You can also pay using the UPI ID from your original Discord
-        order message.
+        We could not verify your order or payment status. This does not tell us
+        whether money left your bank or UPI account. If you attempted a transfer,
+        check your transaction history and contact Aventas support using your order
+        reference before attempting another payment. Do not reuse old payment instructions.
       </p>
       <button
         onClick={onRetry}
@@ -280,7 +289,9 @@ function SessionCard({
   pollerState: PollerState | null;
 }) {
   const confirmed = phase === "confirmed";
-  const expired = phase === "expired";
+  const expired = phase === "expired" || phase === "cancelled";
+  const statusStale = (pollerState?.consecutiveFailures ?? 0) > 0;
+  const paymentInstructionsVerified = !qrMismatch && !statusStale && verifyQrMatchesSession(session);
 
   return (
     <section className="overflow-hidden rounded-2xl border border-avantas-edge bg-avantas-panel/80 shadow-2xl shadow-black/40">
@@ -302,7 +313,17 @@ function SessionCard({
 
         <p className="mt-3 text-sm text-avantas-muted">{session.product.name}</p>
 
-        {!confirmed && !expired && (
+        {!confirmed && !expired && !paymentInstructionsVerified && (
+          <div role="alert" className="mt-5 rounded-xl border border-avantas-danger/40 bg-avantas-danger/10 p-4">
+            <p className="font-semibold text-avantas-danger">Payment instructions cannot be verified</p>
+            <p className="mt-2 text-sm text-avantas-muted">
+              Do not transfer money or reuse a copied UPI ID. Check your transaction
+              history if you already paid, then contact Aventas support through Discord.
+            </p>
+          </div>
+        )}
+
+        {!confirmed && !expired && paymentInstructionsVerified && (
           <>
             <div className="mt-5 rounded-xl border border-avantas-edge bg-avantas-ink/60 p-4">
               <div className="flex items-center justify-between gap-3">
@@ -332,9 +353,7 @@ function SessionCard({
                 </div>
               ) : (
                 <div className="grid h-[248px] w-[248px] place-items-center rounded-xl border border-dashed border-avantas-edge bg-avantas-ink/40 text-center text-xs text-avantas-muted">
-                  {qrMismatch
-                    ? "Payment code could not be verified. Please use the UPI ID above."
-                    : "Preparing payment code…"}
+                  {"Preparing payment code…"}
                 </div>
               )}
               <p className="mt-3 text-center text-xs text-avantas-muted">
@@ -361,20 +380,23 @@ function SessionCard({
 
         {confirmed && (
           <div className="mt-5 rounded-xl border border-avantas-accent/40 bg-avantas-accent/10 p-4">
-            <p className="font-semibold text-avantas-accent">Payment confirmed</p>
+            <p className="font-semibold text-avantas-accent">Order marked paid by Aventas</p>
             <p className="mt-1 text-sm text-avantas-muted">
-              Your order has been recorded. Delivery follows in Discord — no further action is
-              needed on this page.
+              Aventas has marked this order as paid. Delivery updates follow in Discord.
+              If your bank history disagrees, contact support with the order reference.
             </p>
           </div>
         )}
 
         {expired && (
           <div className="mt-5 rounded-xl border border-avantas-warn/40 bg-avantas-warn/10 p-4">
-            <p className="font-semibold text-avantas-warn">This checkout session has expired</p>
+            <p className="font-semibold text-avantas-warn">
+              {phase === "cancelled" ? "This checkout session was cancelled" : "This checkout session has expired"}
+            </p>
             <p className="mt-1 text-sm text-avantas-muted">
-              For your security, payment links expire. Please return to your Aventas order in
-              Discord and request a fresh checkout link — do not send payment to this page.
+              This checkout link is no longer payable. Do not send another transfer.
+              If you attempted a payment, check your bank history and contact support
+              before requesting a fresh checkout link.
             </p>
           </div>
         )}
