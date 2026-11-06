@@ -8,6 +8,7 @@ import {
 } from "../src/services/sqlEmailReviewStore";
 import type { InboxEvidenceEnvelope } from "../src/services/payment/emailReviewIntake";
 import type { ReviewOrderSnapshot } from "../src/services/payment/amountOnlyReview";
+import type { SqlExecutor, SqlValue } from "../src/adapters/sqlPort";
 
 const NOW = Date.parse("2026-11-07T05:00:00.000Z");
 const envelope: InboxEvidenceEnvelope = {
@@ -166,6 +167,112 @@ describe("durable incoming email is review evidence only", () => {
     const res = await queueEmailEvidenceForReview(store, envelope, [candidate], 0);
     expect(res.kind).toBe("REJECTED");
     expect(res.intake.paymentVerified).toBe(false);
+    expect(db.query("SELECT COUNT(*) AS n FROM payment_email_review_receipts").get()).toEqual({ n: 0 });
+    db.close();
+  });
+});
+
+describe("SQL race and fail-closed fault injection", () => {
+  function interception(
+    store: SqlExecutor,
+    onFirstInsert: (sql: string, params: SqlValue[]) => Promise<void>,
+    table: string,
+  ): SqlExecutor {
+    let injected = false;
+    return {
+      get: <T>(sql: string, params: SqlValue[]) => store.get<T>(sql, params),
+      all: <T>(sql: string, params: SqlValue[]) => store.all<T>(sql, params),
+      run: async (sql: string, params: SqlValue[]) => {
+        if (!injected && sql.includes(`INSERT INTO ${table}`)) {
+          injected = true;
+          await onFirstInsert(sql, params);
+        }
+        return store.run(sql, params);
+      },
+    };
+  }
+
+  test("competing worker reserving the same order returns its recorded amount", async () => {
+    const { db, store } = setup();
+    const racing = interception(
+      store,
+      async (sql, params) => {
+        await store.run(sql, [params[0]!, params[1]!, 48000, 48005, NOW]);
+      },
+      "payment_amount_reservations",
+    );
+    expect(await reserveFractionalAmountProposal(racing, reserve("AVT-race"))).toEqual({
+      kind: "REPLAY", amountPaise: 48005,
+    });
+    expect(db.query("SELECT COUNT(*) AS n FROM payment_amount_reservations").get()).toEqual({ n: 1 });
+    db.close();
+  });
+
+  test("competing worker that changed the order base is rejected, not repriced", async () => {
+    const { db, store } = setup();
+    const racing = interception(
+      store,
+      async (sql, params) => {
+        await store.run(sql, [params[0]!, params[1]!, 48100, 48105, NOW]);
+      },
+      "payment_amount_reservations",
+    );
+    expect(await reserveFractionalAmountProposal(racing, reserve("AVT-race"))).toEqual({
+      kind: "ORDER_FACTS_CHANGED", amountPaise: null,
+    });
+    db.close();
+  });
+
+  test("concurrent identical Gmail insert is a duplicate, never a second candidate", async () => {
+    const { db, store } = setup();
+    const racing = interception(
+      store,
+      async (sql, params) => {
+        await store.run(sql, params);
+      },
+      "payment_email_review_receipts",
+    );
+    const result = await queueEmailEvidenceForReview(racing, envelope, [candidate], NOW);
+    expect(result.kind).toBe("DUPLICATE");
+    expect(result.intake.candidateOrderId).toBeNull();
+    expect(result.intake.canFulfill).toBe(false);
+    db.close();
+  });
+
+  test("competing Gmail insert with same message ID but different digest holds for conflict", async () => {
+    const { db, store } = setup();
+    const racing = interception(
+      store,
+      async (sql, params) => {
+        await store.run(sql, [params[0]!, "b".repeat(64), params[2]!, params[3]!, params[4]!]);
+      },
+      "payment_email_review_receipts",
+    );
+    const result = await queueEmailEvidenceForReview(racing, envelope, [candidate], NOW);
+    expect(result.kind).toBe("CONTENT_CONFLICT");
+    expect(result.intake.paymentVerified).toBe(false);
+    db.close();
+  });
+
+  test("a failed insert with no durable competing receipt fails loudly, never approves", async () => {
+    const { db, store } = setup();
+    const racing: SqlExecutor = {
+      get: <T>(sql: string, params: SqlValue[]) => store.get<T>(sql, params),
+      all: <T>(sql: string, params: SqlValue[]) => store.all<T>(sql, params),
+      run: async (_sql, _params) => ({ rowsAffected: 0 }),
+    };
+    await expect(queueEmailEvidenceForReview(racing, envelope, [candidate], NOW))
+      .rejects.toThrow("REVIEW_RECEIPT_WRITE_CONFLICT");
+    db.close();
+  });
+
+  test("malformed envelope never reaches the review receipt table", async () => {
+    const { db, store } = setup();
+    const result = await queueEmailEvidenceForReview(store, {
+      ...envelope, mailboxMessageId: "../dangerous",
+    }, [candidate], NOW);
+    expect(result.kind).toBe("REJECTED");
+    expect(result.intake.paymentVerified).toBe(false);
     expect(db.query("SELECT COUNT(*) AS n FROM payment_email_review_receipts").get()).toEqual({ n: 0 });
     db.close();
   });
