@@ -119,6 +119,9 @@ async function verifySessionImpl(
       providerRef,
       deps.clock,
     );
+    if (updated.status !== "PAID" || updated.providerTransactionRef !== providerRef) {
+      throw conflict();
+    }
     logger.log("verify_recorded", {
       order_id: orderId,
       provider_transaction_ref: providerRef,

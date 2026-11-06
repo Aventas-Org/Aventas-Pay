@@ -8,7 +8,7 @@
  */
 
 import type { CheckoutSession, Clock, SessionStore } from "../domain/types";
-import { canTransition } from "../domain/stateMachine";
+import { canTransition, effectiveStatus } from "../domain/stateMachine";
 import { deriveIdempotencyKey } from "../domain/idempotency";
 import { ApiError, rateLimited, validationError } from "../domain/errors";
 import { requireBotAuth } from "./auth";
@@ -75,10 +75,13 @@ async function cancelSessionImpl(
     throw new ApiError("NOT_FOUND", 404);
   }
 
-  if (!canTransition(session.status, "CANCELLED")) {
+  // A PENDING row past expires_at is already EXPIRED to readers. A late
+  // cancellation must not turn an expired payment instruction into CANCELLED.
+  const status = effectiveStatus(session, now);
+  if (!canTransition(status, "CANCELLED")) {
     return jsonResponse(200, {
       ...toPublicSessionView(session),
-      status: session.status,
+      status,
     });
   }
 

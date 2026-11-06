@@ -172,6 +172,27 @@ describe("handleVerifySession", () => {
     expect(pub.body.status).toBe("CANCELLED");
   });
 
+  test("a cancellation winning the verification race cannot return PAID", async () => {
+    const env = makeEnv();
+    const created = await createSession(env);
+    const originalUpdate = env.store.updateStatus.bind(env.store);
+    env.store.updateStatus = async (id, from, to, now, providerRef) => {
+      if (to === "PAID") {
+        await originalUpdate(id, from, "CANCELLED", now);
+        return false;
+      }
+      return originalUpdate(id, from, to, now, providerRef);
+    };
+    const result = await handleVerifySession(env.deps, verifyRequest({
+      order_id: "AVT-2026-000123",
+      provider_transaction_ref: "UTR-RACE-1234",
+    }));
+    expect(result.status).toBe(409);
+    expect(JSON.parse(result.body).error.code).toBe("CONFLICT");
+    expect((await publicStatus(env, created.checkout_token)).body.status).toBe("CANCELLED");
+    expect(env.logger.events.some((entry) => entry.event === "verify_recorded")).toBe(false);
+  });
+
   test("unknown order returns generic 404", async () => {
     const env = makeEnv();
     const res = await handleVerifySession(env.deps, verifyRequest({
