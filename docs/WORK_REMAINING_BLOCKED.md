@@ -25,22 +25,42 @@ not approval to mutate Cloudflare or production payment settings.
   variable-name inventory contains **no** checkout enablement, payment API
   secret or checkout API/base URL names. Only the production Railway
   environment was listed. Thus no hosted checkout activation is evidenced.
-- **Cloudflare was not accessible to this audit on 2026-11-06.** The previous
-  2026-10-23 read-only inventory in DEPLOYMENT_CHECKLIST.md found no checkout
-  tables in production D1, no payment Worker secrets, and no isolated staging
-  Worker/D1. Recheck live Cloudflare resources before relying on that inventory.
+- **Cloudflare was not accessible to this audit on 2026-11-06.** The
+  **operator-reported** staging inventory in Aventas-website
+  [docs/staging-sprint3.md](https://github.com/Aventas-Org/Aventas-website/blob/main/docs/staging-sprint3.md)
+  identifies an existing `aventas-staging` Worker and `aventas-staging-db`
+  D1 UUID `9e298657-2d0f-4dcc-818d-9435386c3050` (503 bootstrap,
+  `workers.dev` disabled, no routes, no tables at that historical inspection).
+  A pinned `wrangler.staging.toml` exists. This is **not fresh live
+  verification**; do **not re-provision** either reported staging resource.
+  The older 2026-10-23 production inventory found no checkout tables or
+  payment Worker secrets; recheck those independently too.
+- Pay [PR #5](https://github.com/Aventas-Org/Aventas-Pay/pull/5) and website
+  [PR #151](https://github.com/Aventas-Org/Aventas-website/pull/151) have
+  green code CI for post-payment checkout reopening and false-PAID race guards,
+  but were not merged at this audit. Website
+  [PR #152](https://github.com/Aventas-Org/Aventas-website/pull/152)
+  adds a green-CI, fail-closed synthetic staging acceptance runner; it has
+  **not run against live staging** because no approved hostname/route or
+  Cloudflare inventory has been verified.
 
 ## Required release sequence (all evidence must be recorded)
 
-1. **Platform owner:** provision and identify isolated *staging* Worker/D1,
-   route and environment bindings. Apply website migrations `0001`, `0002`,
-   `0003` to **staging only**; verify session/event/rate-limit tables and
-   provider-reference uniqueness. Do not point staging at production D1.
+1. **Platform owner:** re-inventory the **existing, reported** isolated
+   staging Worker and D1 before any changes. Confirm the pinned staging
+   identity, schema, Worker binding, routes, and production separation against
+   fresh Cloudflare evidence. After separate staging approval, apply website
+   migrations `0001`, `0002`, `0003` to **staging only**; verify
+   session/event/rate-limit tables and provider-reference uniqueness. Never
+   point staging at production D1 or duplicate existing resources.
 2. **Security/operator:** configure independent staging `PAYMENT_API_SECRET`
    (shared only with staging bot) and Worker-only `PAYMENT_TOKEN_SECRET`;
    confirm their names and correct bindings without printing values. Restrict
    the staging Discord deployment to a controlled test guild/account.
-3. **QA + payments:** with fake funds and synthetic receipts, prove exact
+3. **QA + payments:** after approval, use the guarded acceptance runner in
+   [website PR #152](https://github.com/Aventas-Org/Aventas-website/pull/152)
+   against an approved staging-only HTTPS hostname, then independently test
+   the bot and receipt pipeline. With fake funds and synthetic receipts, prove exact
    persisted post-wallet order amount equals UPI snapshot/QR; no customer
    click, screenshot, redirect or polling can mark PAID; trusted staff or
    uniquely matched Slice verification can. Replays with changed facts
