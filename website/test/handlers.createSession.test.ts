@@ -189,6 +189,62 @@ describe("handleCreateSession — idempotency", () => {
     expect(JSON.parse(replay.body).checkout_url).toBe(firstBody.checkout_url);
   });
 
+  test("rejects reused checkout links when any authoritative payment fact changes", async () => {
+    const changes: Record<string, unknown>[] = [
+      { amount_paise: 100000 },
+      { discord_user_id: "987654321012345678" },
+      { product_id: "different-product" },
+      { product_name: "Different product" },
+      { payment_profile_id: "backup" },
+      { upi: { vpa: "other@upi", display_name: "Aventas Store" } },
+      { upi: { vpa: "merchant@upi", display_name: "Different payee" } },
+    ];
+    for (const change of changes) {
+      const { deps, store } = makeDeps();
+      const first = await handleCreateSession(deps, makeRequest(validBody()));
+      const changed = await handleCreateSession(deps, makeRequest(validBody(change)));
+      expect(first.status).toBe(201);
+      expect(changed.status).toBe(409);
+      expect(JSON.parse(changed.body).error.code).toBe("CONFLICT");
+      expect(changed.body).not.toContain("checkout_token");
+      expect(changed.body).not.toContain("checkout_url");
+      expect(store.sessions.size).toBe(1);
+    }
+  });
+
+  test("rejects different orders sharing an explicit active idempotency key", async () => {
+    const { deps, store } = makeDeps();
+    const idempotency_key = "replayed-cross-order-key";
+    const first = await handleCreateSession(
+      deps, makeRequest(validBody({ idempotency_key })),
+    );
+    const second = await handleCreateSession(
+      deps, makeRequest(validBody({ order_id: "AVT-2026-999999", idempotency_key })),
+    );
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(409);
+    expect(store.sessions.size).toBe(1);
+  });
+
+  test("rejects a changed payment snapshot even if concurrent insertion loses a race", async () => {
+    const { deps, store } = makeDeps();
+    const first = await handleCreateSession(deps, makeRequest(validBody()));
+    expect(first.status).toBe(201);
+    const existing = [...store.sessions.values()][0]!;
+    // Simulate another request inserting the winner between the dedupe reads
+    // and this request's INSERT, which raises UNIQUE(idempotency_key, attempt).
+    store.findActiveByOrderId = async () => null;
+    let lookups = 0;
+    store.findLatestByIdempotencyKey = async () => (++lookups === 1 ? null : existing);
+    store.insertSession = async () => { throw new IdempotencyConflict(); };
+    const changed = await handleCreateSession(
+      deps, makeRequest(validBody({ amount_paise: 100000 })),
+    );
+    expect(changed.status).toBe(409);
+    expect(JSON.parse(changed.body).error.code).toBe("CONFLICT");
+    expect(store.sessions.size).toBe(1);
+  });
+
   test("after expiry a new attempt is created and gets a fresh token", async () => {
     const { deps, clock, store } = makeDeps();
     const first = await handleCreateSession(
