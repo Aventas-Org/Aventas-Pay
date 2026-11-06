@@ -49,25 +49,44 @@ describe("CheckoutPage states", () => {
     }
   });
 
-  test("confirmed state renders the confirmed banner and hides payment steps", async () => {
+  test("confirmed state uses staff-verified wording and hides payment steps", async () => {
     await renderState("paid");
-    expect(screen.getByText(/payment received/i)).toBeTruthy();
-    expect(screen.getByText(/Payment confirmed/i)).toBeTruthy();
+    expect(screen.getByText(/Order marked paid by Aventas/i)).toBeTruthy();
     expect(screen.queryByText(/Scan with any UPI app/i)).toBeNull();
   });
 
   test("expired state explains the session is dead and cannot be paid", async () => {
     await renderState("expired");
     expect(screen.getByText(/Session expired/i)).toBeTruthy();
-    expect(screen.getByText(/do not send payment to this page/i)).toBeTruthy();
+    expect(screen.getByText(/Do not send another transfer/i)).toBeTruthy();
     expect(screen.queryByText(/Scan with any UPI app/i)).toBeNull();
   });
 
-  test("unavailable state offers retry and reassures the order is safe", async () => {
+  test("cancelled checkout never displays a payment destination or instructions", async () => {
+    await renderState("cancelled");
+    expect(screen.getByText(/Session cancelled/i)).toBeTruthy();
+    expect(screen.getByText(/This checkout session was cancelled/i)).toBeTruthy();
+    expect(screen.queryByText("avantas@okhdfcbank")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Copy/i })).toBeNull();
+    expect(screen.queryByText(/Scan with any UPI app/i)).toBeNull();
+  });
+
+  test("mismatched QR amount hides UPI ID, copy, and transfer steps", async () => {
+    await renderState("mismatch");
+    expect(screen.getByText(/Payment instructions cannot be verified/i)).toBeTruthy();
+    expect(screen.queryByText("avantas@okhdfcbank")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Copy/i })).toBeNull();
+    expect(screen.queryByText(/Scan with any UPI app/i)).toBeNull();
+    expect(screen.queryByAltText(/UPI payment QR code/i)).toBeNull();
+  });
+
+  test("unavailable state offers retry but makes no bank-debit assurances", async () => {
     const { container } = await renderState("error");
     expect(screen.getByRole("alert")).toBeTruthy();
     expect(screen.getByText(/Checkout is temporarily unavailable/i)).toBeTruthy();
-    expect(screen.getByText(/your order is safe/i)).toBeTruthy();
+    expect(screen.getByText(/does not tell us whether money left/i)).toBeTruthy();
+    expect(screen.queryByText(/no payment has been taken/i)).toBeNull();
+    expect(screen.queryByText(/Scan with any UPI app/i)).toBeNull();
     const retry = screen.getByRole("button", { name: /Retry/i });
     // Clicking retry re-enters loading without crashing.
     fireEvent.click(retry);
