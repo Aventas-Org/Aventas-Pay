@@ -92,6 +92,28 @@ describe("untrusted bank-mail extraction (manual review only)", () => {
     expect(parsed.reportedRrn).toBe("629401841605");
   });
 
+  test("decodes UTF8 Q-encoded email subjects solely for manual-review evidence", () => {
+    const parsed = parseUntrustedPaymentEmail({
+      ...fake,
+      subject: "=?UTF-8?Q?Received_=E2=82=B9100.00?=",
+      body: "RRN: 629401841605",
+    });
+    expect(parsed.reportedAmountPaise).toBe(10000);
+    expect(parsed.reportedRrn).toBe("629401841605");
+    expect(parsed.paymentVerified).toBe(false);
+  });
+
+  test("malformed MIME base64 is untrusted and never treated as a payment", () => {
+    const parsed = parseUntrustedPaymentEmail({
+      ...fake,
+      subject: "=?UTF-8?B?!!!?=",
+      body: "RRN: 629401841605",
+    });
+    expect(parsed.reportedAmountPaise).toBeNull();
+    expect(parsed.warnings).toContain("MISSING_AMOUNT");
+    expect(parsed.canFulfill).toBe(false);
+  });
+
   test("oversized/malformed inputs are rejected with safe diagnostic codes", () => {
     for (const email of [
       { ...fake, body: "x".repeat(16_385) },
