@@ -189,7 +189,7 @@ export function CheckoutPage({ token, mock }: Props) {
         <Header />
         {phase === "loading" && <LoadingCard />}
         {phase === "unavailable" && <UnavailableCard onRetry={retry} />}
-        {(phase === "awaiting" || phase === "confirmed" || phase === "expired") && session && (
+        {(phase === "awaiting" || phase === "confirmed" || phase === "expired" || phase === "cancelled") && session && (
           <SessionCard
             session={session}
             phase={phase}
@@ -419,18 +419,18 @@ function StatusBanner({
         aria-live="polite"
         className="flex items-center gap-2 bg-avantas-accent/15 px-6 py-3 text-sm font-semibold text-avantas-accent"
       >
-        <span aria-hidden>✓</span> Awaiting confirmation from Discord — payment received
+        <span aria-hidden>✓</span> Order marked paid by Aventas
       </div>
     );
   }
-  if (phase === "expired") {
+  if (phase === "expired" || phase === "cancelled") {
     return (
       <div
         role="status"
         aria-live="polite"
         className="flex items-center gap-2 bg-avantas-warn/15 px-6 py-3 text-sm font-semibold text-avantas-warn"
       >
-        <span aria-hidden>!</span> Session expired
+        <span aria-hidden>!</span> {phase === "cancelled" ? "Session cancelled" : "Session expired"}
       </div>
     );
   }
