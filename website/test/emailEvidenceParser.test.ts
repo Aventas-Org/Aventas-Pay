@@ -2,84 +2,68 @@ import { describe, expect, test } from "bun:test";
 import { parseUntrustedPaymentEmail, type UntrustedPaymentEmail } from "../src/services/payment/emailEvidenceParser";
 
 const fake: UntrustedPaymentEmail = {
-  from: "Slice Bank <noreply@slice.bank.in>",
+  from: "bank-alert@example.test",
   subject: "Received ₹1,234.50 from a customer",
   body: "UPI Ref No: 629401841605. Received INR 1234.50.",
   authenticationResults: "dkim=pass; spf=pass",
 };
-describe("untrusted bank-mail extraction (manual review only)", () => {
-  test("parses same rupee amount and labeled RRN without verifying payment", () => {
+
+describe("untrusted amount-only bank-mail extraction (manual review only)", () => {
+  test("parses paise but does not extract UTR, RRN or authorize payment", () => {
     const parsed = parseUntrustedPaymentEmail(fake);
     expect(parsed.reportedAmountPaise).toBe(123450);
-    expect(parsed.reportedRrn).toBe("629401841605");
+    expect(parsed).not.toHaveProperty("reportedRrn");
+    expect(parsed.warnings).not.toContain("MISSING_REFERENCE");
     expect(parsed.classification).toBe("NEEDS_REVIEW");
     expect(parsed.paymentVerified).toBe(false);
     expect(parsed.canFulfill).toBe(false);
-    expect(parsed.warnings).toContain("UNTRUSTED_EMAIL_SOURCE");
-    expect(parsed).not.toHaveProperty("status", "PAID");
+    expect(parsed).not.toHaveProperty("status");
   });
 
-  test.each(["noreply@slice.bank.in", "attacker@example.test", "Slice <noreply@slice.bank.in>"])(
-    "never trusts purported sender %s even with DKIM/SPF-looking header", (from) => {
+  test.each(["bank-alert@example.test", "attacker@example.test", "Bank <bank-alert@example.test>"])(
+    "never trusts claimed sender %s or email auth headers as settlement", (from) => {
       const parsed = parseUntrustedPaymentEmail({ ...fake, from });
       expect(parsed.paymentVerified).toBe(false);
       expect(parsed.canFulfill).toBe(false);
     },
   );
 
-  test("rejects conflicting rupee amounts and separate reference numbers", () => {
+  test("rejects contradictory amounts, regardless of transaction references", () => {
     const parsed = parseUntrustedPaymentEmail({
       ...fake,
       subject: "Received ₹500.00",
       body: "Amount INR 600.00. RRN: 629401841605, UTR: 629401841606",
     });
     expect(parsed.reportedAmountPaise).toBeNull();
-    expect(parsed.reportedRrn).toBeNull();
     expect(parsed.warnings).toContain("CONFLICTING_AMOUNTS");
-    expect(parsed.warnings).toContain("CONFLICTING_REFERENCES");
+    expect(parsed).not.toHaveProperty("reportedRrn");
   });
 
-  test.each(["₹1,23,456.78", "INR 1,234.50", "Rs. 99.05", "₹1"])(
-    "accepts valid explicit rupee formats %s without a float rounding path", (amount) => {
-      const parsed = parseUntrustedPaymentEmail({ ...fake, subject: amount, body: "RRN: 629401841605" });
+  test.each(["₹1,23,456.78", "INR 1,234.50", "Rs. 99.05", "₹1", "₹480.24"])(
+    "parses exact INR paise for %s", (amount) => {
+      const parsed = parseUntrustedPaymentEmail({ ...fake, subject: amount, body: "No money amount in body" });
       expect(parsed.reportedAmountPaise).toBeGreaterThan(0);
       expect(Number.isSafeInteger(parsed.reportedAmountPaise)).toBe(true);
+      expect(parsed.paymentVerified).toBe(false);
     },
   );
 
   test.each(["₹1,2", "₹0", "₹-20", "₹9999999999999999999999999", "INR 1.234"])(
-    "does not convert invalid, nonpositive, overlarge or sub-paise amount %s", (amount) => {
-      const parsed = parseUntrustedPaymentEmail({ ...fake, subject: amount, body: "RRN: 629401841605" });
+    "rejects invalid, nonpositive, overlarge or sub-paise amount %s", (amount) => {
+      const parsed = parseUntrustedPaymentEmail({ ...fake, subject: amount, body: "No money amount in body" });
       expect(parsed.reportedAmountPaise).toBeNull();
       expect(parsed.paymentVerified).toBe(false);
     },
   );
 
-  test("accepts a sentence-ending period after a valid exact INR amount", () => {
+  test("treats a sentence-ending period as punctuation, not an extra decimal digit", () => {
     const parsed = parseUntrustedPaymentEmail({
       ...fake,
       subject: "Received ₹500.00.",
-      body: "Amount INR 600.00. RRN: 629401841605",
+      body: "Amount INR 600.00.",
     });
     expect(parsed.reportedAmountPaise).toBeNull();
     expect(parsed.warnings).toContain("CONFLICTING_AMOUNTS");
-    // Still review-only despite plausible bank-style wording.
-    expect(parsed.canFulfill).toBe(false);
-  });
-
-  test("does not mistake any 12-digit customer/order ID for an RRN", () => {
-    const parsed = parseUntrustedPaymentEmail({
-      ...fake, subject: "Received ₹100", body: "Customer number 629401841605",
-    });
-    expect(parsed.reportedRrn).toBeNull();
-    expect(parsed.warnings).toContain("MISSING_REFERENCE");
-  });
-
-  test("requires an exact 12-digit labeled reference", () => {
-    const parsed = parseUntrustedPaymentEmail({
-      ...fake, body: "RRN: 62940184160533",
-    });
-    expect(parsed.reportedRrn).toBeNull();
   });
 
   test.each([
@@ -91,77 +75,60 @@ describe("untrusted bank-mail extraction (manual review only)", () => {
     const parsed = parseUntrustedPaymentEmail({
       ...fake,
       subject: "Account activity",
-      body: `<script type="text/javascript">Received INR 9999.99. RRN: 999888777666${closeTag}<p>Received INR 75.50. RRN: 629401841605</p>`,
+      body: `<script type="text/javascript">Received INR 9999.99.${closeTag}<p>Received INR 75.50.</p>`,
     });
     expect(parsed.reportedAmountPaise).toBe(7550);
-    expect(parsed.reportedRrn).toBe("629401841605");
     expect(parsed.warnings).not.toContain("CONFLICTING_AMOUNTS");
-    expect(parsed.warnings).not.toContain("CONFLICTING_REFERENCES");
-    expect(parsed.classification).toBe("NEEDS_REVIEW");
     expect(parsed.canFulfill).toBe(false);
   });
 
   test.each(["</style >", "</STYLE\t>", '</style class="x">'])(
     "discards non-rendered style content with %s", (closeTag) => {
       const parsed = parseUntrustedPaymentEmail({
-        ...fake,
-        subject: "Account activity",
-        body: `<style>content: "INR 9999.99 RRN: 999888777666";${closeTag}<div>INR 75.50 RRN: 629401841605</div>`,
+        ...fake, subject: "Account activity",
+        body: `<style>content: "INR 9999.99";${closeTag}<div>INR 75.50</div>`,
       });
       expect(parsed.reportedAmountPaise).toBe(7550);
-      expect(parsed.reportedRrn).toBe("629401841605");
-      expect(parsed.canFulfill).toBe(false);
     },
   );
 
   test.each(["script", "style"])(
-    "drops an unclosed %s block through EOF rather than parsing hidden fake receipts", (tag) => {
+    "drops an unclosed %s block through EOF", (tag) => {
       const parsed = parseUntrustedPaymentEmail({
-        ...fake,
-        subject: "Account activity",
-        body: `<${tag}>INR 9999.99 RRN: 999888777666<p>INR 75.50 RRN: 629401841605</p>`,
+        ...fake, subject: "Account activity",
+        body: `<${tag}>INR 9999.99<p>INR 75.50</p>`,
       });
       expect(parsed.reportedAmountPaise).toBeNull();
-      expect(parsed.reportedRrn).toBeNull();
       expect(parsed.warnings).toContain("MISSING_AMOUNT");
-      expect(parsed.warnings).toContain("MISSING_REFERENCE");
-      expect(parsed.paymentVerified).toBe(false);
     },
   );
 
-  test("decodes UTF8 MIME subject and ignores script tags during extraction", () => {
+  test("decodes UTF-8 MIME base64 subject without trusting sender or RRN", () => {
     const parsed = parseUntrustedPaymentEmail({
       ...fake,
       subject: "=?UTF-8?B?" + Buffer.from("Received ₹300.00").toString("base64") + "?=",
-      body: "<script>Received ₹999999 and RRN: 999888777666</script><p>RRN: 629401841605</p>",
+      body: "<script>Received ₹999999</script><p>RRN: 629401841605</p>",
     });
     expect(parsed.reportedAmountPaise).toBe(30000);
-    expect(parsed.reportedRrn).toBe("629401841605");
+    expect(parsed).not.toHaveProperty("reportedRrn");
   });
 
-  test("decodes UTF8 Q-encoded email subjects solely for manual-review evidence", () => {
+  test("decodes MIME Q-encoded subject for evidence only", () => {
     const parsed = parseUntrustedPaymentEmail({
-      ...fake,
-      subject: "=?UTF-8?Q?Received_=E2=82=B9100.00?=",
-      body: "RRN: 629401841605",
+      ...fake, subject: "=?UTF-8?Q?Received_=E2=82=B9100.00?=", body: "",
     });
     expect(parsed.reportedAmountPaise).toBe(10000);
-    expect(parsed.reportedRrn).toBe("629401841605");
     expect(parsed.paymentVerified).toBe(false);
   });
 
-  test("malformed MIME base64 is untrusted and never treated as a payment", () => {
-    const parsed = parseUntrustedPaymentEmail({
-      ...fake,
-      subject: "=?UTF-8?B?!!!?=",
-      body: "RRN: 629401841605",
-    });
+  test("invalid MIME base64 cannot imply a payment", () => {
+    const parsed = parseUntrustedPaymentEmail({ ...fake, subject: "=?UTF-8?B?!!!?=", body: "" });
     expect(parsed.reportedAmountPaise).toBeNull();
     expect(parsed.warnings).toContain("MISSING_AMOUNT");
     expect(parsed.canFulfill).toBe(false);
   });
 
-  test("oversized/malformed inputs are rejected with safe diagnostic codes", () => {
+  test("oversized/malformed inputs get safe diagnostics with no extracted reference", () => {
     for (const email of [
       { ...fake, body: "x".repeat(16_385) },
       { ...fake, from: "x".repeat(513) },
@@ -170,13 +137,13 @@ describe("untrusted bank-mail extraction (manual review only)", () => {
     ]) {
       const parsed = parseUntrustedPaymentEmail(email);
       expect(parsed.reportedAmountPaise).toBeNull();
-      expect(parsed.reportedRrn).toBeNull();
+      expect(parsed).not.toHaveProperty("reportedRrn");
       expect(parsed.warnings).toContain("INVALID_OR_OVERSIZED_INPUT");
       expect(JSON.stringify(parsed)).not.toContain(fake.from);
     }
   });
 
-  test("no email metadata or untrusted auth result can trigger fulfillment", () => {
+  test("even purported DKIM, SPF and DMARC success cannot authorize fulfillment", () => {
     const parsed = parseUntrustedPaymentEmail({
       ...fake, authenticationResults: "dkim=pass; spf=pass; dmarc=pass",
     });

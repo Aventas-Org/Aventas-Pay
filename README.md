@@ -22,3 +22,5 @@ Run locally:
 For the live repository state, configuration, staging sequence, acceptance criteria, and rollback, see [the staging runbook](docs/DEPLOYMENT_CHECKLIST.md). The older blocked-work notes have been replaced with a current summary in `docs/WORK_REMAINING_BLOCKED.md`.
 
 The standalone demo requires Node.js 22.12+ or 24+ for Vite 8. Build assets in `frontend/dist/` are generated locally and are not source-controlled; the deployed website owns its own checkout bundle. Run `bun audit` in both JavaScript packages before release.
+
+Amount-only email parsing and optional decimal reconciliation suggestions are review-only utilities; they cannot mark orders paid. See [the amount-only design](docs/AMOUNT_ONLY_EMAIL_RECONCILIATION.md) and the [verified PSP contract](docs/VERIFIED_PSP_SETTLEMENT_CONTRACT.md).
