@@ -114,6 +114,46 @@ def test_prefixed_env_wins_over_unprefixed():
     assert cfg.api_url == "https://prefixed.example"
 
 
+@pytest.mark.parametrize("blank", ["", "  "])
+def test_blank_authoritative_flag_never_reenables_legacy_checkout(blank):
+    cfg = CheckoutConfig.from_env({
+        "AVENTAS_CHECKOUT_ENABLED": blank,
+        "CHECKOUT_ENABLED": "true",
+        "WEBSITE_BASE_URL": "https://legacy.example",
+        "PAYMENT_API_URL": "https://legacy.example",
+        "PAYMENT_API_SECRET": SECRET,
+    })
+    assert cfg.enabled is False
+
+
+@pytest.mark.parametrize(("prefixed", "alias"), [
+    ("AVENTAS_WEBSITE_BASE_URL", "WEBSITE_BASE_URL"),
+    ("AVENTAS_PAYMENT_API_URL", "PAYMENT_API_URL"),
+    ("AVENTAS_PAYMENT_API_SECRET", "PAYMENT_API_SECRET"),
+])
+def test_blank_authoritative_payment_field_never_falls_back(prefixed, alias):
+    with pytest.raises(CheckoutDisabled):
+        CheckoutConfig.from_env(env(**{
+            prefixed: "",
+            alias: SECRET if "SECRET" in prefixed else "https://legacy.example",
+        }))
+
+
+def test_unknown_flag_never_echoes_untrusted_environment_value():
+    sensitive = "private-merchant-key-should-not-appear"
+    with pytest.raises(CheckoutDisabled) as exc:
+        CheckoutConfig.from_env(env(AVENTAS_CHECKOUT_ENABLED=sensitive))
+    assert sensitive not in str(exc.value)
+    assert "unrecognized" in str(exc.value)
+
+
+def test_optional_numeric_empty_still_falls_back_to_legacy_alias():
+    cfg = CheckoutConfig.from_env(
+        env(AVENTAS_CHECKOUT_MAX_RETRIES="", CHECKOUT_MAX_RETRIES="3")
+    )
+    assert cfg.max_retries == 3
+
+
 def test_unprefixed_disabled_flag_is_honoured():
     cfg = CheckoutConfig.from_env({"CHECKOUT_ENABLED": "false"})
     assert cfg.enabled is False
