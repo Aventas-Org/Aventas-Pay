@@ -50,7 +50,7 @@ def _lookup(
     """Read the prefixed value first, failing closed on explicit blank payment settings."""
     if name in _SECURITY_OVERRIDES and name in source:
         value = source[name]
-        return "" if value is None else str(value)
+        return "" if value is None or not str(value).strip() else str(value)
     value = source.get(name)
     if value is not None and str(value).strip() != "":
         return str(value)
