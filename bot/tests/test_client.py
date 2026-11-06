@@ -100,6 +100,8 @@ class RecordingServer:
             }
         )
         scenario = self.scenario
+        if scenario == "redirect":
+            return web.Response(status=307, headers={"Location": "/redirect-target"})
         if scenario == "unauthorized":
             return web.json_response(
                 {"error": {"code": "UNAUTHORIZED", "message": "Authentication failed."}},
@@ -326,3 +328,66 @@ async def test_status_and_cancel_work(server):
     cancelled = await client.cancel_session(ORDER.order_id)
     assert cancelled["status"] == "CANCELLED"
     await client.__aexit__()
+
+
+@pytest.mark.parametrize("status_code", [301, 302, 303, 307, 308])
+@pytest.mark.parametrize("operation", ["create", "cancel", "status"])
+async def test_redirect_never_forwards_credentials_or_payment_body(status_code, operation):
+    target_requests = []
+
+    async def redirect(request):
+        return web.Response(status=status_code, headers={"Location": "/redirect-target"})
+
+    async def target(request):
+        target_requests.append((request.headers.get("Authorization"), await request.read()))
+        return web.json_response({"status": "PENDING"})
+
+    app = web.Application()
+    app.router.add_route("*", "/redirect-target", target)
+    app.router.add_route("*", "/{path:.*}", redirect)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    try:
+        await web.TCPSite(runner, "127.0.0.1", 0).start()
+        origin = f"http://127.0.0.1:{runner.addresses[0][1]}"
+        async with CheckoutClient(make_config(origin), sleep=no_sleep) as client:
+            with pytest.raises(CheckoutApiError) as error:
+                if operation == "create":
+                    await client.create_checkout_session(ORDER, PROFILE, actor_discord_id=ORDER.owner_discord_id)
+                elif operation == "cancel":
+                    await client.cancel_session(ORDER.order_id)
+                else:
+                    await client.get_session_status(TOKEN)
+            assert error.value.status == status_code
+        assert target_requests == []
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.parametrize("token", ["x" * 32, TOKEN])
+@pytest.mark.parametrize("response_status", [200, 503])
+async def test_status_paths_never_log_bearer_token(token, response_status, caplog):
+    async def respond(request):
+        return web.json_response({"status": "PENDING"}, status=response_status)
+
+    app = web.Application()
+    app.router.add_get("/{path:.*}", respond)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    try:
+        await web.TCPSite(runner, "127.0.0.1", 0).start()
+        origin = f"http://127.0.0.1:{runner.addresses[0][1]}"
+        async with CheckoutClient(make_config(origin, max_retries=1), sleep=no_sleep) as client:
+            with caplog.at_level(logging.INFO, logger="avantas.checkout"):
+                if response_status == 200:
+                    await client.get_session_status(token)
+                else:
+                    with pytest.raises(CheckoutApiError):
+                        await client.get_session_status(token)
+        assert token not in caplog.text
+        assert "[REDACTED]" in caplog.text
+        if response_status == 503:
+            assert "retrying" in caplog.text
+            assert "request_failed" in caplog.text
+    finally:
+        await runner.cleanup()
