@@ -76,8 +76,12 @@ function readableSubject(subject: string): string {
 function readableBody(body: string): string {
   // Strip only for evidence extraction; do not render the result as HTML.
   return body
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+    // End tags may contain whitespace or other attributes (e.g. </script >,
+    // </script foo="bar">). Discard unmatched raw-text blocks through EOF
+    // instead of accidentally extracting fake payment amounts from them.
+    // This is evidence extraction only, NEVER an HTML sanitizer for rendering.
+    .replace(/<script\b[^>]*>[\s\S]*?(?:<\/script\b[^>]*>|$)/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?(?:<\/style\b[^>]*>|$)/gi, " ")
     .replace(/<[^>]*>/g, " ")
     .replace(/&nbsp;|&#160;/gi, " ")
     .replace(/&#8377;|&#x20b9;/gi, "₹")
