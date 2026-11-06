@@ -28,7 +28,7 @@ from avantas_checkout import (
 )
 
 SECRET = "integration-secret-value-1234"
-TOKEN = "tok_" + "a" * 43
+TOKEN = "a" * 43  # The canonical HMAC-SHA256/base64url capability shape
 
 ORDER = OrderFacts(
     order_id="AVT-2026-000123",
@@ -300,6 +300,58 @@ async def test_order_ref_mismatch_is_invalid(server):
     with pytest.raises(InvalidSessionResponse):
         await client.create_checkout_session(ORDER, PROFILE, actor_discord_id=ORDER.owner_discord_id)
     await client.__aexit__()
+
+
+# ----------------------------------------------------- server response integrity
+
+def test_exact_canonical_checkout_response_is_accepted():
+    client = CheckoutClient(make_config("http://127.0.0.1:12345"))
+    body = RecordingServer()._ok_payload()
+    result = client._parse_session_response(body, ORDER, PROFILE)
+    assert result.status == "PENDING"
+    assert result.checkout_token == TOKEN
+    assert result.reused is False
+    body["reused"] = True
+    assert client._parse_session_response(body, ORDER, PROFILE).reused is True
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("amount_paise", ORDER.amount_paise + 1),
+    ("amount_paise", True),  # bool is a subclass of int in Python
+    ("amount_paise", 999.5),
+    ("amount_paise", None),
+    ("currency", "USD"),
+    ("currency", None),
+    ("product", {"name": "Wrong product"}),
+    ("product", None),
+    ("upi", {"vpa": "other@upi", "display_name": PROFILE.display_name}),
+    ("upi", {"vpa": PROFILE.vpa, "display_name": "Wrong merchant"}),
+    ("upi", None),
+    ("session_status", "PAID"),
+    ("session_status", "EXPIRED"),
+    ("session_status", "CANCELLED"),
+    ("reused", "false"),
+    ("reused", 1),
+    ("reused", None),
+    ("expires_at", "not-an-iso-date"),
+    ("expires_at", "2026-10-20T10:30:00+05:30"),
+    ("expires_at", "2026-10-20T10:30:00"),
+    ("checkout_token", "a" * 32),
+    ("checkout_token", "a" * 47),
+    ("checkout_token", "a" * 42 + "!"),
+])
+def test_mismatched_checkout_response_is_rejected_before_link(field, value):
+    client = CheckoutClient(make_config("http://127.0.0.1:12345"))
+    body = RecordingServer()._ok_payload()
+    body[field] = value
+    if field == "checkout_token":
+        body["checkout_url"] = f"https://avantas.example/checkout/{value}"
+    with pytest.raises(InvalidSessionResponse) as exc:
+        client._parse_session_response(body, ORDER, PROFILE)
+    # No returned bearer capability, secrets, or customer data in error text.
+    assert SECRET not in str(exc.value)
+    assert TOKEN not in str(exc.value)
+    assert ORDER.owner_discord_id not in str(exc.value)
 
 
 # ----------------------------------------------------------------- logging
