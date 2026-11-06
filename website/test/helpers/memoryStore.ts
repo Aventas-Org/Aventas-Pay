@@ -58,6 +58,12 @@ export class InMemorySessionStore implements SessionStore {
     return matches.sort((a, b) => b.attempt - a.attempt)[0] ?? null;
   }
 
+  async findPaidByOrderId(orderId: string): Promise<CheckoutSession | null> {
+    return [...this.sessions.values()]
+      .filter((s) => s.orderId === orderId && s.status === "PAID")
+      .sort((a, b) => (b.paidAt?.getTime() ?? 0) - (a.paidAt?.getTime() ?? 0))[0] ?? null;
+  }
+
   async findLatestByIdempotencyKey(key: string): Promise<CheckoutSession | null> {
     const matches = [...this.sessions.values()].filter((s) => s.idempotencyKey === key);
     return matches.sort((a, b) => b.attempt - a.attempt)[0] ?? null;
