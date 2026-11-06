@@ -5,13 +5,14 @@
  * adapter must, so handler behaviour under concurrency matches production.
  */
 
-import type {
+import {
   CheckoutSession,
+  IdempotencyConflict,
+  OrderAlreadyPaid,
   SessionEvent,
   SessionStatus,
   SessionStore,
-} from "../../src/domain/types.ts";
-import { IdempotencyConflict } from "../../src/domain/types.ts";
+} from "../../src/domain/types";
 
 export class InMemorySessionStore implements SessionStore {
   readonly sessions = new Map<string, CheckoutSession>();
@@ -22,6 +23,9 @@ export class InMemorySessionStore implements SessionStore {
 
   async insertSession(session: CheckoutSession, tokenHash: string): Promise<void> {
     this.maybeFail();
+    if ([...this.sessions.values()].some(
+      (existing) => existing.orderId === session.orderId && existing.status === "PAID"
+    )) throw new OrderAlreadyPaid();
     for (const existing of this.sessions.values()) {
       if (
         existing.idempotencyKey === session.idempotencyKey &&
@@ -56,6 +60,12 @@ export class InMemorySessionStore implements SessionStore {
         now.getTime() < s.expiresAt.getTime(),
     );
     return matches.sort((a, b) => b.attempt - a.attempt)[0] ?? null;
+  }
+
+  async findPaidByOrderId(orderId: string): Promise<CheckoutSession | null> {
+    return [...this.sessions.values()]
+      .filter((s) => s.orderId === orderId && s.status === "PAID")
+      .sort((a, b) => (b.paidAt?.getTime() ?? 0) - (a.paidAt?.getTime() ?? 0))[0] ?? null;
   }
 
   async findLatestByIdempotencyKey(key: string): Promise<CheckoutSession | null> {

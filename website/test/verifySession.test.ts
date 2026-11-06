@@ -4,14 +4,14 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { handleVerifySession } from "../src/handlers/verifySession.ts";
-import { handleCreateSession } from "../src/handlers/createSession.ts";
-import { handleSessionStatus } from "../src/handlers/sessionStatus.ts";
-import { InMemoryRateLimiter } from "../src/domain/rateLimit.ts";
-import { capturingLogger } from "../src/domain/log.ts";
-import { migratedExecutor } from "./helpers/bunSqlite.ts";
-import { SqlSessionStore } from "../src/adapters/sqlSessionStore.ts";
-import { HandlerRequest } from "../src/handlers/http.ts";
+import { handleVerifySession } from "../src/handlers/verifySession";
+import { handleCreateSession } from "../src/handlers/createSession";
+import { handleSessionStatus } from "../src/handlers/sessionStatus";
+import { InMemoryRateLimiter } from "../src/domain/rateLimit";
+import { capturingLogger } from "../src/domain/log";
+import { migratedExecutor } from "./helpers/bunSqlite";
+import { SqlSessionStore } from "../src/adapters/sqlSessionStore";
+import { HandlerRequest } from "../src/handlers/http";
 
 const BOT_SECRET = "bot-secret-at-least-16-characters";
 
@@ -172,6 +172,27 @@ describe("handleVerifySession", () => {
     expect(pub.body.status).toBe("CANCELLED");
   });
 
+  test("a cancellation winning the verification race cannot return PAID", async () => {
+    const env = makeEnv();
+    const created = await createSession(env);
+    const originalUpdate = env.store.updateStatus.bind(env.store);
+    env.store.updateStatus = async (id, from, to, now, providerRef) => {
+      if (to === "PAID") {
+        await originalUpdate(id, from, "CANCELLED", now);
+        return false;
+      }
+      return originalUpdate(id, from, to, now, providerRef);
+    };
+    const result = await handleVerifySession(env.deps, verifyRequest({
+      order_id: "AVT-2026-000123",
+      provider_transaction_ref: "UTR-RACE-1234",
+    }));
+    expect(result.status).toBe(409);
+    expect(JSON.parse(result.body).error.code).toBe("CONFLICT");
+    expect((await publicStatus(env, created.checkout_token)).body.status).toBe("CANCELLED");
+    expect(env.logger.events.some((entry) => entry.event === "verify_recorded")).toBe(false);
+  });
+
   test("unknown order returns generic 404", async () => {
     const env = makeEnv();
     const res = await handleVerifySession(env.deps, verifyRequest({
@@ -225,6 +246,9 @@ describe("handleVerifySession", () => {
     expect(blob).not.toContain(BOT_SECRET);
     expect(blob).not.toContain(TOKEN_SECRET);
     expect(blob).not.toContain("123456789012345678");
+    // Short provider references are bank receipt evidence, not telemetry.
+    expect(blob).not.toContain("UTR-LOG-TEST1");
+    expect(recorded!.fields.provider_transaction_ref).toBe("[REDACTED]");
   });
 });
 

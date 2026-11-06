@@ -7,9 +7,9 @@ import {
   isActive,
   isExpired,
   recordTrustedPayment,
-} from "../src/domain/stateMachine.ts";
-import { CheckoutSession } from "../src/domain/types.ts";
-import { InMemorySessionStore } from "./helpers/memoryStore.ts";
+} from "../src/domain/stateMachine";
+import { CheckoutSession } from "../src/domain/types";
+import { InMemorySessionStore } from "./helpers/memoryStore";
 
 const NOW = new Date("2026-10-20T10:00:00Z");
 const LATER = new Date("2026-10-20T11:00:00Z");
@@ -122,7 +122,7 @@ describe("state machine", () => {
     ).rejects.toThrow(IllegalTransition);
   });
 
-  test("optimistic-update race returns current state instead of overwriting", async () => {
+  test("optimistic-update race cannot acknowledge cancellation as payment", async () => {
     const store = new InMemorySessionStore();
     const s = session();
     store.sessions.set(s.id, s);
@@ -147,9 +147,32 @@ describe("state machine", () => {
       return false;
     };
 
-    const result = await recordTrustedPayment(store, s.id, "txn-123", clockAt(NOW));
-    expect(result.status).toBe("CANCELLED");
+    await expect(recordTrustedPayment(store, s.id, "txn-123", clockAt(NOW)))
+      .rejects.toThrow(IllegalTransition);
+    expect((await store.findById(s.id))!.status).toBe("CANCELLED");
     // The losing writer must not have appended a payment event.
     expect(store.events).toHaveLength(0);
+  });
+
+  test("concurrent verification replay only succeeds for the same receipt", async () => {
+    for (const reference of ["txn-123", "txn-other"]) {
+      const store = new InMemorySessionStore();
+      const s = session();
+      store.sessions.set(s.id, s);
+      const originalUpdate = store.updateStatus.bind(store);
+      store.updateStatus = async (id, from, _to, now) => {
+        await originalUpdate(id, from, "PAID", now, "txn-123");
+        return false;
+      };
+      if (reference === "txn-123") {
+        const result = await recordTrustedPayment(store, s.id, reference, clockAt(NOW));
+        expect(result.status).toBe("PAID");
+        expect(result.providerTransactionRef).toBe(reference);
+      } else {
+        await expect(recordTrustedPayment(store, s.id, reference, clockAt(NOW)))
+          .rejects.toThrow(IllegalTransition);
+      }
+      expect(store.events).toHaveLength(0);
+    }
   });
 });

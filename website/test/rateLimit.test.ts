@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { InMemoryRateLimiter } from "../src/domain/rateLimit.ts";
+import { InMemoryRateLimiter } from "../src/domain/rateLimit";
 
 const T0 = new Date("2026-10-20T10:00:00Z");
 const at = (seconds: number) => new Date(T0.getTime() + seconds * 1000);

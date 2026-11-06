@@ -10,7 +10,6 @@
     "exactOptionalPropertyTypes": false,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
-    "allowImportingTsExtensions": true,
     "noEmit": true,
     "types": ["bun"]
   },

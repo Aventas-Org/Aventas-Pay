@@ -4,11 +4,11 @@
  * the check cannot drift between them.
  */
 
-import { constantTimeEqual } from "../domain/tokens.ts";
-import { unauthorized } from "../domain/errors.ts";
-import { nullLogger } from "../domain/log.ts";
-import type { CheckoutLogger } from "../domain/log.ts";
-import type { HandlerRequest } from "./http.ts";
+import { constantTimeEqual } from "../domain/tokens";
+import { unauthorized } from "../domain/errors";
+import { nullLogger } from "../domain/log";
+import type { CheckoutLogger } from "../domain/log";
+import type { HandlerRequest } from "./http";
 
 export async function requireBotAuth(
   botApiSecret: string,

@@ -5,8 +5,8 @@
 import { describe, expect, test } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlRateLimiter } from "../src/adapters/sqlRateLimiter.ts";
-import { migratedExecutor } from "./helpers/bunSqlite.ts";
+import { SqlRateLimiter } from "../src/adapters/sqlRateLimiter";
+import { migratedExecutor } from "./helpers/bunSqlite";
 
 const T0 = new Date("2026-10-20T10:00:00Z");
 const at = (seconds: number) => new Date(T0.getTime() + seconds * 1000);

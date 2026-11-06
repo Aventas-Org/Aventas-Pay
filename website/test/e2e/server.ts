@@ -15,16 +15,16 @@
 import { Database } from "bun:sqlite";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { BunSqliteExecutor } from "../helpers/bunSqlite.ts";
-import { SqlSessionStore } from "../../src/adapters/sqlSessionStore.ts";
-import { SqlRateLimiter } from "../../src/adapters/sqlRateLimiter.ts";
-import { InMemoryRateLimiter } from "../../src/domain/rateLimit.ts";
-import { consoleLogger } from "../../src/domain/log.ts";
-import { handleCreateSession } from "../../src/handlers/createSession.ts";
-import { handleSessionStatus } from "../../src/handlers/sessionStatus.ts";
-import { handleCancelSession } from "../../src/handlers/cancelSession.ts";
-import { handleVerifySession } from "../../src/handlers/verifySession.ts";
-import { HandlerRequest, HandlerResponse } from "../../src/handlers/http.ts";
+import { BunSqliteExecutor } from "../helpers/bunSqlite";
+import { SqlSessionStore } from "../../src/adapters/sqlSessionStore";
+import { SqlRateLimiter } from "../../src/adapters/sqlRateLimiter";
+import { InMemoryRateLimiter } from "../../src/domain/rateLimit";
+import { consoleLogger } from "../../src/domain/log";
+import { handleCreateSession } from "../../src/handlers/createSession";
+import { handleSessionStatus } from "../../src/handlers/sessionStatus";
+import { handleCancelSession } from "../../src/handlers/cancelSession";
+import { handleVerifySession } from "../../src/handlers/verifySession";
+import { HandlerRequest, HandlerResponse } from "../../src/handlers/http";
 
 const BOT_SECRET = process.env.E2E_BOT_SECRET ?? "";
 const TOKEN_SECRET = process.env.E2E_TOKEN_SECRET ?? "";

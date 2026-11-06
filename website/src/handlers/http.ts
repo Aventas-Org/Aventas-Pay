@@ -4,8 +4,8 @@
  * functions/api/[[route]].ts maps its incoming Request onto these inputs.
  */
 
-import { ApiError, internalError, securityHeaders } from "../domain/errors.ts";
-import type { CheckoutLogger } from "../domain/log.ts";
+import { ApiError, internalError, securityHeaders } from "../domain/errors";
+import type { CheckoutLogger } from "../domain/log";
 
 export interface HandlerRequest {
   method: string;
@@ -35,12 +35,16 @@ export function jsonResponse(status: number, payload: unknown): HandlerResponse 
 
 export function errorResponse(err: unknown, logger?: CheckoutLogger): HandlerResponse {
   if (err instanceof ApiError) return jsonResponse(err.status, err.body);
-  // Unexpected failure: log it server-side (message + name only, no bodies or
-  // secrets), return a generic envelope. Never leak internals to the client.
-  logger?.log("internal_error", {
-    error_name: err instanceof Error ? err.name : typeof err,
-    error_message: err instanceof Error ? err.message : "unknown",
-  });
+  // Never log arbitrary error.name or error.message: database/HTTP failures can
+  // embed UPI IDs, checkout capabilities, receipt identifiers or credentials.
+  // Redaction by regex is not sufficient for free-form exception text.
+  // Retain only a small, trusted category for operational error counts.
+  const errorCategory =
+    err instanceof TypeError ? "TypeError" :
+    err instanceof RangeError ? "RangeError" :
+    err instanceof SyntaxError ? "SyntaxError" :
+    err instanceof Error ? "Error" : "NonError";
+  logger?.log("internal_error", { error_name: errorCategory });
   const fallback = internalError();
   return jsonResponse(fallback.status, fallback.body);
 }

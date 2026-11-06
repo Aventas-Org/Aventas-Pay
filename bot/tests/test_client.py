@@ -28,7 +28,7 @@ from avantas_checkout import (
 )
 
 SECRET = "integration-secret-value-1234"
-TOKEN = "tok_" + "a" * 43
+TOKEN = "a" * 43  # The canonical HMAC-SHA256/base64url capability shape
 
 ORDER = OrderFacts(
     order_id="AVT-2026-000123",
@@ -66,7 +66,6 @@ class RecordingServer:
             "/api/payments/checkout-sessions/{token}", self._status
         )
         self._app.router.add_post("/api/payments/checkout-sessions/cancel", self._cancel)
-        self._app.router.add_post("/api/payments/checkout-sessions/verify", self._verify)
         self._runner = None
         self.port = None
 
@@ -101,6 +100,8 @@ class RecordingServer:
             }
         )
         scenario = self.scenario
+        if scenario == "redirect":
+            return web.Response(status=307, headers={"Location": "/redirect-target"})
         if scenario == "unauthorized":
             return web.json_response(
                 {"error": {"code": "UNAUTHORIZED", "message": "Authentication failed."}},
@@ -145,27 +146,6 @@ class RecordingServer:
     async def _cancel(self, request: web.Request) -> web.Response:
         self.requests.append({"path": request.path, "method": "POST", "auth": None, "body": None})
         return web.json_response({"status": "CANCELLED"}, status=200)
-
-    async def _verify(self, request: web.Request) -> web.Response:
-        try:
-            body = await request.json()
-        except Exception:  # noqa: BLE001
-            body = None
-        self.requests.append(
-            {
-                "path": request.path,
-                "method": request.method,
-                "auth": request.headers.get("Authorization"),
-                "body": body,
-            }
-        )
-        return web.json_response(
-            {
-                "status": "PAID",
-                "provider_transaction_ref": body.get("provider_transaction_ref") if body else None,
-            },
-            status=200,
-        )
 
 
 @pytest.fixture
@@ -280,7 +260,7 @@ async def test_timeout_raises_checkout_timeout_after_bounded_attempts(server):
 
 async def test_unreachable_api_is_bounded_transport_failure():
     cfg = make_config(
-        "http://127.0.0.1:9/api",
+        "http://127.0.0.1:9",
         max_retries=1,
         connect_timeout_seconds=0.2,
         total_timeout_seconds=0.2,
@@ -322,6 +302,58 @@ async def test_order_ref_mismatch_is_invalid(server):
     await client.__aexit__()
 
 
+# ----------------------------------------------------- server response integrity
+
+def test_exact_canonical_checkout_response_is_accepted():
+    client = CheckoutClient(make_config("http://127.0.0.1:12345"))
+    body = RecordingServer()._ok_payload()
+    result = client._parse_session_response(body, ORDER, PROFILE)
+    assert result.status == "PENDING"
+    assert result.checkout_token == TOKEN
+    assert result.reused is False
+    body["reused"] = True
+    assert client._parse_session_response(body, ORDER, PROFILE).reused is True
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("amount_paise", ORDER.amount_paise + 1),
+    ("amount_paise", True),  # bool is a subclass of int in Python
+    ("amount_paise", 999.5),
+    ("amount_paise", None),
+    ("currency", "USD"),
+    ("currency", None),
+    ("product", {"name": "Wrong product"}),
+    ("product", None),
+    ("upi", {"vpa": "other@upi", "display_name": PROFILE.display_name}),
+    ("upi", {"vpa": PROFILE.vpa, "display_name": "Wrong merchant"}),
+    ("upi", None),
+    ("session_status", "PAID"),
+    ("session_status", "EXPIRED"),
+    ("session_status", "CANCELLED"),
+    ("reused", "false"),
+    ("reused", 1),
+    ("reused", None),
+    ("expires_at", "not-an-iso-date"),
+    ("expires_at", "2026-10-20T10:30:00+05:30"),
+    ("expires_at", "2026-10-20T10:30:00"),
+    ("checkout_token", "a" * 32),
+    ("checkout_token", "a" * 47),
+    ("checkout_token", "a" * 42 + "!"),
+])
+def test_mismatched_checkout_response_is_rejected_before_link(field, value):
+    client = CheckoutClient(make_config("http://127.0.0.1:12345"))
+    body = RecordingServer()._ok_payload()
+    body[field] = value
+    if field == "checkout_token":
+        body["checkout_url"] = f"https://avantas.example/checkout/{value}"
+    with pytest.raises(InvalidSessionResponse) as exc:
+        client._parse_session_response(body, ORDER, PROFILE)
+    # No returned bearer capability, secrets, or customer data in error text.
+    assert SECRET not in str(exc.value)
+    assert TOKEN not in str(exc.value)
+    assert ORDER.owner_discord_id not in str(exc.value)
+
+
 # ----------------------------------------------------------------- logging
 
 async def test_logs_never_contain_secret_token_or_body(server, caplog):
@@ -350,11 +382,82 @@ async def test_status_and_cancel_work(server):
     await client.__aexit__()
 
 
-async def test_verify_session_works(server):
-    client = await create_client(server)
-    res = await client.verify_checkout_session(ORDER.order_id, "629401841605")
-    assert res["status"] == "PAID"
-    assert res["provider_transaction_ref"] == "629401841605"
-    assert server.requests[-1]["auth"] == f"Bearer {SECRET}"
-    assert server.requests[-1]["path"] == "/api/payments/checkout-sessions/verify"
-    await client.__aexit__()
+@pytest.mark.parametrize("status_code", [301, 302, 303, 307, 308])
+@pytest.mark.parametrize("operation", ["create", "cancel", "status"])
+async def test_redirect_never_forwards_credentials_or_payment_body(status_code, operation):
+    target_requests = []
+
+    async def redirect(request):
+        return web.Response(status=status_code, headers={"Location": "/redirect-target"})
+
+    async def target(request):
+        target_requests.append((request.headers.get("Authorization"), await request.read()))
+        return web.json_response({"status": "PENDING"})
+
+    app = web.Application()
+    app.router.add_route("*", "/redirect-target", target)
+    app.router.add_route("*", "/{path:.*}", redirect)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    try:
+        await web.TCPSite(runner, "127.0.0.1", 0).start()
+        origin = f"http://127.0.0.1:{runner.addresses[0][1]}"
+        async with CheckoutClient(make_config(origin), sleep=no_sleep) as client:
+            with pytest.raises(CheckoutApiError) as error:
+                if operation == "create":
+                    await client.create_checkout_session(ORDER, PROFILE, actor_discord_id=ORDER.owner_discord_id)
+                elif operation == "cancel":
+                    await client.cancel_session(ORDER.order_id)
+                else:
+                    await client.get_session_status(TOKEN)
+            assert error.value.status == status_code
+        assert target_requests == []
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.parametrize("token", ["x" * 32, TOKEN])
+@pytest.mark.parametrize("response_status", [200, 503])
+async def test_status_paths_never_log_bearer_token(token, response_status, caplog):
+    async def respond(request):
+        return web.json_response({"status": "PENDING"}, status=response_status)
+
+    app = web.Application()
+    app.router.add_get("/{path:.*}", respond)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    try:
+        await web.TCPSite(runner, "127.0.0.1", 0).start()
+        origin = f"http://127.0.0.1:{runner.addresses[0][1]}"
+        async with CheckoutClient(make_config(origin, max_retries=1), sleep=no_sleep) as client:
+            with caplog.at_level(logging.INFO, logger="avantas.checkout"):
+                if response_status == 200:
+                    await client.get_session_status(token)
+                else:
+                    with pytest.raises(CheckoutApiError):
+                        await client.get_session_status(token)
+        assert token not in caplog.text
+        assert "[REDACTED]" in caplog.text
+        if response_status == 503:
+            assert "retrying" in caplog.text
+            assert "request_failed" in caplog.text
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.parametrize("url", [
+    "https://attacker.example/checkout/" + TOKEN,
+    "https://avantas.example.attacker.example/checkout/" + TOKEN,
+    "https://avantas.example/checkout/" + TOKEN + "?redirect=evil",
+    "https://avantas.example/checkout/" + TOKEN + "#fragment",
+    "https://user:password@avantas.example/checkout/" + TOKEN,
+    "http://avantas.example/checkout/" + TOKEN,
+    "https://avantas.example/checkout/different-token",
+])
+async def test_unapproved_checkout_response_url_is_rejected(server, url):
+    payload = server._ok_payload()
+    payload["checkout_url"] = url
+    server._ok_payload = lambda: payload
+    async with CheckoutClient(make_config(server.url), sleep=no_sleep) as client:
+        with pytest.raises(InvalidSessionResponse):
+            await client.create_checkout_session(ORDER, PROFILE, actor_discord_id=ORDER.owner_discord_id)

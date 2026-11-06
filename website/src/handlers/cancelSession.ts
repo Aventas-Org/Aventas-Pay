@@ -7,16 +7,16 @@
  * returns the current state with 200 and performs no transition.
  */
 
-import type { CheckoutSession, Clock, SessionStore } from "../domain/types.ts";
-import { canTransition } from "../domain/stateMachine.ts";
-import { deriveIdempotencyKey } from "../domain/idempotency.ts";
-import { ApiError, rateLimited, validationError } from "../domain/errors.ts";
-import { requireBotAuth } from "./auth.ts";
-import type { RateLimiter } from "../domain/rateLimit.ts";
-import type { CheckoutLogger } from "../domain/log.ts";
-import { dispatch, jsonResponse, parseJsonBody } from "./http.ts";
-import type { HandlerRequest, HandlerResponse } from "./http.ts";
-import { toPublicSessionView } from "./view.ts";
+import type { CheckoutSession, Clock, SessionStore } from "../domain/types";
+import { canTransition, effectiveStatus } from "../domain/stateMachine";
+import { deriveIdempotencyKey } from "../domain/idempotency";
+import { ApiError, rateLimited, validationError } from "../domain/errors";
+import { requireBotAuth } from "./auth";
+import type { RateLimiter } from "../domain/rateLimit";
+import type { CheckoutLogger } from "../domain/log";
+import { dispatch, jsonResponse, parseJsonBody } from "./http";
+import type { HandlerRequest, HandlerResponse } from "./http";
+import { toPublicSessionView } from "./view";
 
 export interface CancelSessionDeps {
   store: SessionStore;
@@ -75,10 +75,13 @@ async function cancelSessionImpl(
     throw new ApiError("NOT_FOUND", 404);
   }
 
-  if (!canTransition(session.status, "CANCELLED")) {
+  // A PENDING row past expires_at is already EXPIRED to readers. A late
+  // cancellation must not turn an expired payment instruction into CANCELLED.
+  const status = effectiveStatus(session, now);
+  if (!canTransition(status, "CANCELLED")) {
     return jsonResponse(200, {
       ...toPublicSessionView(session),
-      status: session.status,
+      status,
     });
   }
 

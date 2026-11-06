@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from urllib.parse import urlsplit
 
 from .errors import CheckoutDisabled
 
@@ -32,10 +33,24 @@ _ENV_ALIASES: dict[str, str] = {
 }
 
 
+# An explicitly blank authoritative value must NEVER reactivate a legacy
+# checkout flag/secret/origin. Optional numeric knobs keep their old
+# empty-as-unspecified fallback to avoid changing operational defaults.
+_SECURITY_OVERRIDES = frozenset({
+    "AVENTAS_CHECKOUT_ENABLED",
+    "AVENTAS_WEBSITE_BASE_URL",
+    "AVENTAS_PAYMENT_API_URL",
+    "AVENTAS_PAYMENT_API_SECRET",
+})
+
+
 def _lookup(
     source: "dict[str, str] | os._Environ[str]", name: str, default: str = ""
 ) -> str:
-    """Reads name, falling back to the repo's unprefixed convention."""
+    """Read the prefixed value first, failing closed on explicit blank payment settings."""
+    if name in _SECURITY_OVERRIDES and name in source:
+        value = source[name]
+        return "" if value is None or not str(value).strip() else str(value)
     value = source.get(name)
     if value is not None and str(value).strip() != "":
         return str(value)
@@ -45,6 +60,21 @@ def _lookup(
         if fallback is not None and str(fallback).strip() != "":
             return str(fallback)
     return default
+
+
+def _checkout_origin(value: str) -> str:
+    """HTTPS origin only; plain HTTP is reserved for loopback integration tests."""
+    try:
+        p = urlsplit(value)
+        local_http = p.scheme == "http" and p.hostname in {"127.0.0.1", "localhost", "::1"}
+        if (any(c.isspace() for c in value) or any(c in value for c in "\\?#") or
+                p.username is not None or p.password is not None or
+                p.path not in {"", "/"} or not p.hostname or
+                (p.scheme != "https" and not local_http) or p.port == 0):
+            raise ValueError("invalid origin")
+        return value.rstrip("/")
+    except ValueError:
+        raise CheckoutDisabled("checkout URL must be an HTTPS origin without credentials, path, query or fragment") from None
 
 
 @dataclass(frozen=True)
@@ -77,6 +107,9 @@ class CheckoutConfig:
                 "checkout enabled but configuration incomplete: " + ", ".join(problems)
             )
 
+        object.__setattr__(self, "base_url", _checkout_origin(self.base_url))
+        object.__setattr__(self, "api_url", _checkout_origin(self.api_url))
+
     @property
     def api_secret(self) -> str:
         return self._api_secret
@@ -90,9 +123,9 @@ class CheckoutConfig:
         elif raw_enabled in _TRUE:
             enabled = True
         else:
-            raise CheckoutDisabled(
-                f"checkout enable flag has unrecognized value {raw_enabled!r}"
-            )
+            # Environment values are untrusted and can contain copied secrets;
+            # never include them in exception text or operator alerts.
+            raise CheckoutDisabled("checkout enable flag has unrecognized value")
         base_url = _lookup(source, "AVENTAS_WEBSITE_BASE_URL").strip().rstrip("/")
         api_url = _lookup(source, "AVENTAS_PAYMENT_API_URL").strip()
         return cls(

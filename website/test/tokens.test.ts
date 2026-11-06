@@ -4,7 +4,7 @@ import {
   deriveCheckoutToken,
   hashCheckoutToken,
   looksLikeCheckoutToken,
-} from "../src/domain/tokens.ts";
+} from "../src/domain/tokens";
 
 const SECRET = "test-secret-value-at-least-16-chars";
 

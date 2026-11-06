@@ -7,7 +7,7 @@
  * (upi://pay) accepted by every UPI app; no provider-specific payload is used.
  */
 
-import type { CheckoutSession } from "./types.ts";
+import type { CheckoutSession } from "./types";
 
 /** Formats paise as a decimal rupee string with exactly 2 fractional digits. */
 export function formatRupees(amountPaise: number): string {

@@ -7,7 +7,6 @@ import {
 } from "./lib/checkoutPoller";
 import { formatInr, PublicSessionView, verifyQrMatchesSession } from "./lib/qr";
 import { mockSnapshot, MockScenario } from "./mockApi";
-import "./checkout.css";
 
 type UiPhase = "loading" | "awaiting" | "confirmed" | "expired" | "unavailable";
 
@@ -20,12 +19,10 @@ interface Props {
 /** Where the website API lives. Transplant: point at the Worker origin. */
 const API_BASE = (import.meta.env.VITE_CHECKOUT_API_BASE as string | undefined) ?? "";
 
-type QrGrid = { size: number; dark: [number, number][] };
-
 export function CheckoutPage({ token, mock }: Props) {
   const [phase, setPhase] = useState<UiPhase>("loading");
   const [session, setSession] = useState<PublicSessionView | null>(null);
-  const [qrDataUrl, setQrDataUrl] = useState<QrGrid | null>(null);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [qrMismatch, setQrMismatch] = useState(false);
   const [copied, setCopied] = useState(false);
   const [pollerState, setPollerState] = useState<PollerState | null>(null);
@@ -35,9 +32,17 @@ export function CheckoutPage({ token, mock }: Props) {
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
 
   const applySession = useCallback((next: PublicSessionView) => {
+    if (!next || typeof next.order_ref !== "string" || typeof next.product?.name !== "string" ||
+        !Number.isSafeInteger(next.amount_paise) || next.amount_paise <= 0 ||
+        next.currency !== "INR" || typeof next.upi?.vpa !== "string" ||
+        typeof next.upi?.display_name !== "string" || typeof next.qr_payload !== "string") {
+      setSession(null);
+      setPhase("unavailable");
+      return;
+    }
     setSession(next);
     if (next.status === "PAID") setPhase("confirmed");
-    else if (next.status === "EXPIRED" || next.status === "CANCELLED") setPhase("expired");
+    else if (next.status === "EXPIRED" || next.status === "CANCELLED" || Date.parse(next.expires_at) <= Date.now()) setPhase("expired");
     else setPhase("awaiting");
   }, []);
 
@@ -87,15 +92,13 @@ export function CheckoutPage({ token, mock }: Props) {
             applySession(outcome.snapshot as unknown as PublicSessionView);
           }
           else if (outcome?.kind === "error" && state.consecutiveFailures >= 1) {
-            // Keep showing the last good data; only go unavailable with nothing.
-            setSession((prev) => {
-              if (prev === null) setPhase("unavailable");
-              return prev;
-            });
+            // Stale data cannot authorise another payment.
+            setPhase("unavailable");
+            setQrDataUrl(null);
           }
         },
-        onStop: () => {
-          /* terminal handling happens via onState phases */
+        onStop: (reason) => {
+          if (!cancelled && reason === "expired") setPhase("expired");
         },
       },
       DEFAULT_POLLER_CONFIG,
@@ -113,6 +116,17 @@ export function CheckoutPage({ token, mock }: Props) {
     };
   }, [token, mockScenario, retryNonce, applySession]);
 
+  // Expiry must hide instructions even if the next request never succeeds.
+  useEffect(() => {
+    if (!session || session.status !== "PENDING") return;
+    const timer = setTimeout(() => setPhase("expired"),
+      Math.max(0, Math.min(2_147_483_647, Date.parse(session.expires_at) - Date.now())));
+    return () => clearTimeout(timer);
+  }, [session]);
+
+  const canPay = phase === "awaiting" && session?.status === "PENDING" &&
+    Date.parse(session.expires_at) > Date.now() && verifyQrMatchesSession(session);
+
   // Render the QR strictly from the server-provided payload, verifying it
   // against the stored session details first.
   useEffect(() => {
@@ -127,23 +141,24 @@ export function CheckoutPage({ token, mock }: Props) {
       setQrDataUrl(null);
       return;
     }
-    try {
-      const q = QRCode.create(session.qr_payload, { errorCorrectionLevel: "H" });
-      const size = q.modules.size;
-      const dark: [number, number][] = [];
-      for (let y = 0; y < size; y++)
-        for (let x = 0; x < size; x++) if (q.modules.get(y, x)) dark.push([x, y]);
-      if (!cancelled) setQrDataUrl({ size, dark });
-    } catch {
-      if (!cancelled) setQrDataUrl(null);
-    }
+    QRCode.toDataURL(session.qr_payload, {
+      width: 224,
+      margin: 1,
+      color: { dark: "#0b1220", light: "#ffffff" },
+    })
+      .then((url) => {
+        if (!cancelled) setQrDataUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setQrDataUrl(null);
+      });
     return () => {
       cancelled = true;
     };
   }, [session]);
 
   const copyUpi = useCallback(async () => {
-    if (!session) return;
+    if (!session || !canPay) return;
     const vpa = session.upi.vpa;
     try {
       if (navigator.clipboard?.writeText) {
@@ -173,13 +188,13 @@ export function CheckoutPage({ token, mock }: Props) {
       setCopyMessage("Copy failed — please select the UPI ID manually");
       setTimeout(() => setCopyMessage(null), 4000);
     }
-  }, [session]);
+  }, [session, canPay]);
 
   const retry = useCallback(() => setRetryNonce((n) => n + 1), []);
 
   return (
-    <main className="co-page">
-      <div className="co-wrap">
+    <main className="min-h-screen flex items-start justify-center px-4 py-10">
+      <div className="w-full max-w-[440px]">
         <Header />
         {phase === "loading" && <LoadingCard />}
         {phase === "unavailable" && <UnavailableCard onRetry={retry} />}
@@ -206,97 +221,60 @@ export function CheckoutPage({ token, mock }: Props) {
 
 function Header() {
   return (
-    <header className="co-top">
-      <span className="co-brand">Aventas Pay</span>
-      <span className="co-secure">Secure checkout</span>
+    <header className="mb-6 flex items-center gap-3">
+      <div className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-avantas-accent to-avantas-accentDim font-display text-lg font-bold text-avantas-ink">
+        A
+      </div>
+      <div>
+        <p className="font-display text-lg font-semibold leading-none text-white">Aventas</p>
+        <p className="text-xs text-avantas-muted">Secure checkout</p>
+      </div>
     </header>
-  );
-}
-
-function Card({ children }: { children: React.ReactNode }) {
-  return (
-    <section className="co-card">
-      <div className="motion-hazard" aria-hidden />
-      {children}
-    </section>
   );
 }
 
 function LoadingCard() {
   return (
-    <Card>
-      <div className="co-body" aria-busy="true" aria-label="Loading checkout details">
-        <div className="co-skel" style={{ display: "grid", gap: 12 }}>
-          <div className="skeleton" style={{ width: "40%" }} />
-          <div className="skeleton" style={{ width: "70%", height: 26 }} />
-          <div className="skeleton" style={{ width: 224, height: 224, margin: "8px auto" }} />
-          <div className="skeleton" style={{ width: "55%" }} />
-        </div>
-        <p className="co-foot" style={{ margin: 0 }}>Loading your order…</p>
+    <section
+      aria-busy="true"
+      aria-label="Loading checkout details"
+      className="rounded-2xl border border-avantas-edge bg-avantas-panel/80 p-6"
+    >
+      <div className="animate-pulse space-y-4">
+        <div className="h-4 w-1/3 rounded bg-avantas-edge" />
+        <div className="h-8 w-2/3 rounded bg-avantas-edge" />
+        <div className="mx-auto h-56 w-56 rounded-xl bg-avantas-edge" />
+        <div className="h-4 w-1/2 rounded bg-avantas-edge" />
+        <div className="h-4 w-3/4 rounded bg-avantas-edge" />
       </div>
-    </Card>
+      <p className="mt-4 text-center text-sm text-avantas-muted">Loading your order…</p>
+    </section>
   );
 }
 
 function UnavailableCard({ onRetry }: { onRetry: () => void }) {
   return (
-    <Card>
-      <div className="co-body" role="alert">
-        <div className="co-center">
-          <div className="co-warnmark" aria-hidden>!</div>
-          <h2>Checkout is temporarily unavailable</h2>
-          <p>
-            We couldn&apos;t reach the payment service. Your order is safe and no payment has
-            been taken. Please retry in a moment.
-          </p>
-        </div>
-        <button onClick={onRetry} className="btn primary co-btn">Retry</button>
+    <section
+      role="alert"
+      className="rounded-2xl border border-avantas-danger/40 bg-avantas-panel/80 p-6 text-center"
+    >
+      <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-avantas-danger/15 text-avantas-danger">
+        !
       </div>
-    </Card>
-  );
-}
-
-/** Seconds left until expires_at. total = the largest value seen (for the bar). */
-function useCountdown(expiresAt: string | undefined, active: boolean) {
-  const [now, setNow] = useState(() => Date.now());
-  const totalRef = useRef(0);
-  useEffect(() => {
-    if (!active) return;
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [active]);
-  const end = expiresAt ? new Date(expiresAt).getTime() : NaN;
-  const left = Number.isNaN(end) ? 0 : Math.max(0, Math.round((end - now) / 1000));
-  if (left > totalRef.current) totalRef.current = left;
-  const total = totalRef.current || 1;
-  return { left, pct: Math.max(0, Math.min(100, (left / total) * 100)) };
-}
-
-function fmtClock(s: number) {
-  const m = Math.floor(s / 60);
-  return `${m}:${String(s % 60).padStart(2, "0")}`;
-}
-
-function SuccessMark() {
-  const parts = Array.from({ length: 16 }, (_, i) => {
-    const a = (i / 16) * Math.PI * 2;
-    const d = 46 + (i % 3) * 14;
-    return { tx: `${Math.cos(a) * d}px`, ty: `${Math.sin(a) * d}px` };
-  });
-  return (
-    <div className="motion-success-mark" aria-hidden>
-      <svg viewBox="0 0 80 80">
-        <circle className="motion-success-ring" cx="40" cy="40" r="36" pathLength={1} />
-        <path className="motion-success-tick" d="M24 41 L35 52 L57 29" pathLength={1} />
-      </svg>
-      {parts.map((p, i) => (
-        <i
-          key={i}
-          className="motion-particle"
-          style={{ ["--tx" as string]: p.tx, ["--ty" as string]: p.ty } as React.CSSProperties}
-        />
-      ))}
-    </div>
+      <h2 className="mt-3 font-display text-lg font-semibold text-white">
+        Checkout is temporarily unavailable
+      </h2>
+      <p className="mt-2 text-sm leading-relaxed text-avantas-muted">
+        We couldn&apos;t confirm the latest order status. If already paid or debited, do not pay
+        again. Ask Aventas staff in Discord to check your order before retrying payment.
+      </p>
+      <button
+        onClick={onRetry}
+        className="mt-5 w-full rounded-xl bg-avantas-accent px-4 py-2.5 font-semibold text-avantas-ink transition hover:bg-avantas-accentDim hover:text-white focus:outline-none focus:ring-2 focus:ring-avantas-accent/60"
+      >
+        Refresh status
+      </button>
+    </section>
   );
 }
 
@@ -311,7 +289,7 @@ function SessionCard({
 }: {
   session: PublicSessionView;
   phase: UiPhase;
-  qrDataUrl: QrGrid | null;
+  qrDataUrl: string | null;
   qrMismatch: boolean;
   copied: boolean;
   onCopy: () => void;
@@ -319,115 +297,115 @@ function SessionCard({
 }) {
   const confirmed = phase === "confirmed";
   const expired = phase === "expired";
-  const awaiting = !confirmed && !expired;
-  const { left, pct } = useCountdown(session.expires_at, awaiting);
-  const critical = left <= 60;
+  const payable = phase === "awaiting" && session.status === "PENDING" &&
+    Date.parse(session.expires_at) > Date.now() && verifyQrMatchesSession(session);
 
   return (
-    <Card>
-      <div className="co-head">
-        <div>
-          <div className="co-eyebrow">Pay to Aventas</div>
-          <div className="co-prod">{session.product.name}</div>
-          <div className="co-ref">{session.order_ref}</div>
+    <section className="overflow-hidden rounded-2xl border border-avantas-edge bg-avantas-panel/80 shadow-2xl shadow-black/40">
+      <StatusBanner phase={phase} pollerState={pollerState} />
+
+      <div className="p-6">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs uppercase tracking-wider text-avantas-muted">Order</p>
+            <p className="font-mono text-sm text-white">{session.order_ref}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-xs uppercase tracking-wider text-avantas-muted">Amount due</p>
+            <p className="font-display text-2xl font-bold text-white">
+              {formatInr(session.amount_paise)}
+            </p>
+          </div>
         </div>
-        <div className="co-amount">{formatInr(session.amount_paise)}</div>
-      </div>
 
-      <div className="co-body">
-        <StatusBanner phase={phase} pollerState={pollerState} />
+        <p className="mt-3 text-sm text-avantas-muted">{session.product.name}</p>
 
-        {awaiting && (
+        {payable && (
           <>
-            <div className="co-count">
-              <div className="co-count-row">
-                <span>Time remaining</span>
-                <b className={`motion-countdown-digits${critical ? " critical" : ""}`}>{fmtClock(left)}</b>
-              </div>
-              <div className={`motion-countdown-bar${critical ? " critical" : ""}`}>
-                <i style={{ width: `${pct}%` }} />
-              </div>
-            </div>
-
-            <div className="co-eyebrow" style={{ textAlign: "center" }}>Scan with any UPI app</div>
-
-            {qrDataUrl ? (
-              <div className="co-qrbox motion-qr-wrap" style={{ ["--qr-h" as string]: "232px" } as React.CSSProperties}>
-                <svg
-                  className="qr-svg"
-                  viewBox={`0 0 ${qrDataUrl.size} ${qrDataUrl.size}`}
-                  width={224}
-                  height={224}
-                  shapeRendering="crispEdges"
-                  role="img"
-                  aria-label="UPI payment QR code for this order"
-                >
-                  {qrDataUrl.dark.map(([x, y]) => (
-                    <rect key={`${x}-${y}`} x={x} y={y} width={1.04} height={1.04} fill="#0A0A0B" style={{ animationDelay: `${(x + y) * 16}ms` }} />
-                  ))}
-                </svg>
-                <div className="co-qrlogo">
-                  <span>
-                    <img src="/aventas-logo.png" alt="Aventas" />
-                  </span>
+            <div className="mt-5 rounded-xl border border-avantas-edge bg-avantas-ink/60 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs uppercase tracking-wider text-avantas-muted">Pay via UPI</p>
+                  <p className="truncate font-mono text-sm text-white">{session.upi.vpa}</p>
+                  <p className="text-xs text-avantas-muted">{session.upi.display_name}</p>
                 </div>
-                <div className="motion-scan-line" aria-hidden />
+                <button
+                  onClick={onCopy}
+                  className="shrink-0 rounded-lg border border-avantas-edge px-3 py-1.5 text-xs font-semibold text-avantas-accent transition hover:border-avantas-accent/60 hover:bg-avantas-accent/10 focus:outline-none focus:ring-2 focus:ring-avantas-accent/50"
+                >
+                  {copied ? "Copied ✓" : "Copy"}
+                </button>
               </div>
-            ) : (
-              <div className="co-qrph">
-                {qrMismatch
-                  ? "Payment code could not be verified. Please use the UPI ID below."
-                  : "Preparing payment code…"}
-              </div>
-            )}
-
-            <div className="co-upi">
-              <div style={{ minWidth: 0 }}>
-                <div className="co-eyebrow">Pay via UPI ID</div>
-                <code>{session.upi.vpa}</code>
-                <small>{session.upi.display_name}</small>
-              </div>
-              <button onClick={onCopy} className="btn secondary sm">
-                {copied ? "Copied ✓" : "Copy"}
-              </button>
             </div>
 
-            <ol className="co-steps">
-              <li><b>1.</b> Open your UPI app and scan the code, or send {formatInr(session.amount_paise)} to the UPI ID above.</li>
-              <li><b>2.</b> Complete the payment inside the app.</li>
-              <li><b>3.</b> Keep this page open. Your order updates automatically once the payment is confirmed.</li>
+            <div className="mt-5 flex flex-col items-center">
+              {qrDataUrl ? (
+                <div className="rounded-xl bg-white p-3">
+                  <img
+                    src={qrDataUrl}
+                    width={224}
+                    height={224}
+                    alt="UPI payment QR code for this order"
+                  />
+                </div>
+              ) : (
+                <div className="grid h-[248px] w-[248px] place-items-center rounded-xl border border-dashed border-avantas-edge bg-avantas-ink/40 text-center text-xs text-avantas-muted">
+                  {qrMismatch
+                    ? "Payment instructions could not be verified. Contact Aventas staff."
+                    : "Preparing payment code…"}
+                </div>
+              )}
+              <p className="mt-3 text-center text-xs text-avantas-muted">
+                Scan with any UPI app (GPay, PhonePe, Paytm, BHIM)
+              </p>
+            </div>
+
+            <ol className="mt-5 space-y-2 text-sm text-avantas-muted">
+              <li className="flex gap-2">
+                <span className="font-semibold text-avantas-accent">1.</span> Open your UPI app and
+                scan the code, or send {formatInr(session.amount_paise)} to the UPI ID above.
+              </li>
+              <li className="flex gap-2">
+                <span className="font-semibold text-avantas-accent">2.</span> Complete the payment
+                inside the app.
+              </li>
+              <li className="flex gap-2">
+                <span className="font-semibold text-avantas-accent">3.</span> Keep this page open —
+                your order updates automatically once the payment is confirmed by our team.
+              </li>
             </ol>
           </>
         )}
 
+        {!confirmed && !expired && !payable && (
+          <p role="alert" className="mt-5 text-sm text-avantas-warn">
+            Payment instructions could not be verified. Do not pay using this page.
+            If already debited, do not pay again; contact Aventas staff in Discord.
+          </p>
+        )}
+
         {confirmed && (
-          <div className="co-center co-success">
-            <SuccessMark />
-            <h2>Payment confirmed</h2>
-            <p>
-              Your order has been recorded. Delivery follows in Discord, so no further action is
+          <div className="mt-5 rounded-xl border border-avantas-accent/40 bg-avantas-accent/10 p-4">
+            <p className="font-semibold text-avantas-accent">Payment verified by Aventas staff</p>
+            <p className="mt-1 text-sm text-avantas-muted">
+              Your order has been recorded. Delivery follows in Discord — no further action is
               needed on this page.
             </p>
           </div>
         )}
 
         {expired && (
-          <div className="co-center">
-            <div className="motion-expired-clock" aria-hidden>
-              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <circle cx="12" cy="12" r="9" />
-                <path d="M12 7v5l3 2" />
-              </svg>
-            </div>
-            <h2>This checkout session has expired</h2>
-            <p>
+          <div className="mt-5 rounded-xl border border-avantas-warn/40 bg-avantas-warn/10 p-4">
+            <p className="font-semibold text-avantas-warn">This checkout session has expired</p>
+            <p className="mt-1 text-sm text-avantas-muted">
               For your security, payment links expire. Please return to your Aventas order in
-              Discord and request a fresh checkout link. Do not send payment to this page.
+              Discord — do not send payment to this page. If already paid or debited, do not pay
+              again; ask staff to reconcile your order before requesting a new link.
             </p>
           </div>
         )}
       </div>
-    </Card>
+    </section>
   );
 }
 
@@ -440,24 +418,39 @@ function StatusBanner({
 }) {
   if (phase === "confirmed") {
     return (
-      <div role="status" aria-live="polite" className="co-status ok">
-        <span aria-hidden>✓</span> Payment received
+      <div
+        role="status"
+        aria-live="polite"
+        className="flex items-center gap-2 bg-avantas-accent/15 px-6 py-3 text-sm font-semibold text-avantas-accent"
+      >
+        <span aria-hidden>✓</span> Payment verified by Aventas staff — delivery continues in Discord
       </div>
     );
   }
   if (phase === "expired") {
     return (
-      <div role="status" aria-live="polite" className="co-status bad">
+      <div
+        role="status"
+        aria-live="polite"
+        className="flex items-center gap-2 bg-avantas-warn/15 px-6 py-3 text-sm font-semibold text-avantas-warn"
+      >
         <span aria-hidden>!</span> Session expired
       </div>
     );
   }
   return (
-    <div role="status" aria-live="polite" className="co-status">
-      <span className="motion-pulse-dot pulse" aria-hidden />
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex items-center gap-2 bg-avantas-accentDim/10 px-6 py-3 text-sm text-avantas-muted"
+    >
+      <span className="relative flex h-2 w-2">
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-avantas-accent opacity-75" />
+        <span className="relative inline-flex h-2 w-2 rounded-full bg-avantas-accent" />
+      </span>
       Awaiting payment confirmation
       {pollerState && pollerState.consecutiveFailures > 0 && (
-        <span className="warnc">reconnecting…</span>
+        <span className="ml-auto text-xs text-avantas-warn">reconnecting…</span>
       )}
     </div>
   );
@@ -465,7 +458,7 @@ function StatusBanner({
 
 function SupportFooter() {
   return (
-    <footer className="co-foot">
+    <footer className="mt-6 text-center text-xs leading-relaxed text-avantas-muted">
       Need help? Open a ticket in the Aventas Discord and quote your order reference.
       <br />
       Never share your UPI PIN, OTP or screen with anyone.

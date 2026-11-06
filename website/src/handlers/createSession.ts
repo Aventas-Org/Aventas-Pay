@@ -15,24 +15,26 @@
  * accepts amounts or recipients.
  */
 
-import { IdempotencyConflict, systemClock } from "../domain/types.ts";
-import type { CheckoutSession, Clock, SessionStore } from "../domain/types.ts";
+import { IdempotencyConflict, OrderAlreadyPaid, systemClock } from "../domain/types";
+import type { CreateSessionRequest } from "../domain/validation";
+import type { CheckoutSession, Clock, SessionStore } from "../domain/types";
 import {
+  conflict,
   notFound,
   rateLimited,
   unauthorized,
   validationError,
-} from "../domain/errors.ts";
-import { deriveCheckoutToken, hashCheckoutToken, constantTimeEqual } from "../domain/tokens.ts";
-import { validateCreateSessionRequest } from "../domain/validation.ts";
-import { deriveIdempotencyKey, nextAttempt, reusableSession } from "../domain/idempotency.ts";
-import { effectiveStatus } from "../domain/stateMachine.ts";
-import type { RateLimiter } from "../domain/rateLimit.ts";
-import { nullLogger } from "../domain/log.ts";
-import type { CheckoutLogger } from "../domain/log.ts";
-import { dispatch, jsonResponse, parseJsonBody } from "./http.ts";
-import type { HandlerRequest, HandlerResponse } from "./http.ts";
-import { toBotCreateResponse } from "./view.ts";
+} from "../domain/errors";
+import { deriveCheckoutToken, hashCheckoutToken, constantTimeEqual } from "../domain/tokens";
+import { validateCreateSessionRequest } from "../domain/validation";
+import { deriveIdempotencyKey, nextAttempt, reusableSession } from "../domain/idempotency";
+import { effectiveStatus } from "../domain/stateMachine";
+import type { RateLimiter } from "../domain/rateLimit";
+import { nullLogger } from "../domain/log";
+import type { CheckoutLogger } from "../domain/log";
+import { dispatch, jsonResponse, parseJsonBody } from "./http";
+import type { HandlerRequest, HandlerResponse } from "./http";
+import { toBotCreateResponse } from "./view";
 
 export interface CreateSessionDeps {
   store: SessionStore;
@@ -49,6 +51,29 @@ export interface CreateSessionDeps {
 }
 
 export const CREATE_RATE_LIMIT = { limit: 120, windowSeconds: 60 };
+
+/**
+ * An idempotent replay must represent the same buyer, item, amount and payee.
+ * Otherwise returning an old checkout link would silently display different
+ * payment instructions than the trusted caller now expects.
+ *
+ * Deliberately exclude TTL: retries cannot extend the original session.
+ */
+function requireIdenticalPaymentFacts(input: CreateSessionRequest, session: CheckoutSession): void {
+  if (
+    session.orderId !== input.orderId ||
+    session.discordUserId !== input.discordUserId ||
+    session.productId !== input.productId ||
+    session.productName !== input.productName ||
+    session.amountPaise !== input.amountPaise ||
+    session.currency !== input.currency ||
+    session.paymentProfileId !== input.paymentProfileId ||
+    session.upi.vpa !== input.upiVpa ||
+    session.upi.displayName !== input.upiDisplayName
+  ) {
+    throw conflict();
+  }
+}
 
 export async function handleCreateSession(
   deps: CreateSessionDeps,
@@ -102,9 +127,17 @@ async function createSessionImpl(
   const input = validated.value;
   const now = deps.clock.now();
 
+  // A successfully paid order may never create a fresh attempt, even when
+  // its prior session is terminal or the caller supplies a different key.
+  if (await deps.store.findPaidByOrderId(input.orderId)) {
+    logger.log("create_rejected", { reason: "order_already_paid", order_id: input.orderId });
+    throw conflict();
+  }
+
   // 4. Dedupe by order: an active session is reused, never duplicated.
   const activeForOrder = await deps.store.findActiveByOrderId(input.orderId, now);
   if (activeForOrder) {
+    requireIdenticalPaymentFacts(input, activeForOrder);
     logger.log("session_reused", {
       order_id: input.orderId,
       reason: "active_session_exists",
@@ -117,7 +150,10 @@ async function createSessionImpl(
   const key = input.idempotencyKey || deriveIdempotencyKey(input.orderId);
   const latestForKey = await deps.store.findLatestByIdempotencyKey(key);
   const reusable = reusableSession(latestForKey, now);
-  if (reusable) return respondExisting(deps, reusable, 200, true);
+  if (reusable) {
+    requireIdenticalPaymentFacts(input, reusable);
+    return respondExisting(deps, reusable, 200, true);
+  }
 
   // 6. Create the next attempt.
   const sessionId = crypto.randomUUID();
@@ -147,11 +183,18 @@ async function createSessionImpl(
   try {
     await deps.store.insertSession(session, tokenHash);
   } catch (err) {
+    if (err instanceof OrderAlreadyPaid) {
+      logger.log("create_rejected", { reason: "order_paid_during_insert", order_id: input.orderId });
+      throw conflict();
+    }
     if (err instanceof IdempotencyConflict) {
       // A concurrent request won the insert: return its active session.
       const winner = await deps.store.findLatestByIdempotencyKey(key);
       const activeWinner = reusableSession(winner, now);
-      if (activeWinner) return respondExisting(deps, activeWinner, 200, true);
+      if (activeWinner) {
+        requireIdenticalPaymentFacts(input, activeWinner);
+        return respondExisting(deps, activeWinner, 200, true);
+      }
       throw notFound();
     }
     throw err;

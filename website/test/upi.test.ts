@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { buildUpiPayload, formatInrDisplay, formatRupees } from "../src/domain/upi.ts";
-import { CheckoutSession } from "../src/domain/types.ts";
+import { buildUpiPayload, formatInrDisplay, formatRupees } from "../src/domain/upi";
+import { CheckoutSession } from "../src/domain/types";
 
 const session: CheckoutSession = {
   id: "sess-1",

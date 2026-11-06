@@ -79,14 +79,11 @@ def _wait_for_port(process: subprocess.Popen, timeout: float = 20.0) -> int:
 
 @pytest.fixture(scope="module")
 def base_url():
-    bun_bin = shutil.which("bun")
-    if not bun_bin:
-        pytest.skip("bun runtime is required for cross-system end-to-end server tests")
     env = dict(os.environ)
     env["E2E_BOT_SECRET"] = E2E_BOT_SECRET
     env["E2E_TOKEN_SECRET"] = E2E_TOKEN_SECRET
     process = subprocess.Popen(
-        [bun_bin, "run", str(SERVER_SCRIPT)],
+        [shutil.which("bun") or "bun", "run", str(SERVER_SCRIPT)],
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,

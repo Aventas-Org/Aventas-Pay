@@ -4,7 +4,7 @@ import {
   MAX_AMOUNT_PAISE,
   MIN_AMOUNT_PAISE,
   validateCreateSessionRequest,
-} from "../src/domain/validation.ts";
+} from "../src/domain/validation";
 
 function validBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {

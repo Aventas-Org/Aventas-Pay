@@ -8,8 +8,8 @@
  * reached a terminal state, the next request legitimately opens attempt N+1.
  */
 
-import type { CheckoutSession } from "./types.ts";
-import { isActive } from "./stateMachine.ts";
+import type { CheckoutSession } from "./types";
+import { isActive } from "./stateMachine";
 
 export const CHECKOUT_OPERATION = "checkout-session";
 

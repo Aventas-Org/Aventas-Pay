@@ -11,8 +11,8 @@
  *     returned from any public endpoint.
  */
 
-import type { CheckoutSession } from "../domain/types.ts";
-import { buildUpiPayload, formatRupees } from "../domain/upi.ts";
+import type { CheckoutSession } from "../domain/types";
+import { buildUpiPayload, formatRupees } from "../domain/upi";
 
 export interface PublicSessionView {
   order_ref: string;

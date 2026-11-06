@@ -13,16 +13,16 @@
  *     revive it, and no public request can ever produce PAID.
  */
 
-import type { Clock, SessionStore } from "../domain/types.ts";
-import { notFound, rateLimited } from "../domain/errors.ts";
-import { hashCheckoutToken, looksLikeCheckoutToken } from "../domain/tokens.ts";
-import { effectiveStatus } from "../domain/stateMachine.ts";
-import type { RateLimiter } from "../domain/rateLimit.ts";
-import { nullLogger } from "../domain/log.ts";
-import type { CheckoutLogger } from "../domain/log.ts";
-import { dispatch, jsonResponse } from "./http.ts";
-import type { HandlerRequest, HandlerResponse } from "./http.ts";
-import { toPublicSessionView } from "./view.ts";
+import type { Clock, SessionStore } from "../domain/types";
+import { notFound, rateLimited } from "../domain/errors";
+import { hashCheckoutToken, looksLikeCheckoutToken } from "../domain/tokens";
+import { effectiveStatus } from "../domain/stateMachine";
+import type { RateLimiter } from "../domain/rateLimit";
+import { nullLogger } from "../domain/log";
+import type { CheckoutLogger } from "../domain/log";
+import { dispatch, jsonResponse } from "./http";
+import type { HandlerRequest, HandlerResponse } from "./http";
+import { toPublicSessionView } from "./view";
 
 export interface SessionStatusDeps {
   store: SessionStore;

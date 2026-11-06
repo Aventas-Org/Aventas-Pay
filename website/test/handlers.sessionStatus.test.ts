@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { handleCreateSession } from "../src/handlers/createSession.ts";
-import { handleSessionStatus, SessionStatusDeps } from "../src/handlers/sessionStatus.ts";
-import { HandlerRequest } from "../src/handlers/http.ts";
-import { InMemoryRateLimiter } from "../src/domain/rateLimit.ts";
-import { hashCheckoutToken } from "../src/domain/tokens.ts";
-import { InMemorySessionStore } from "./helpers/memoryStore.ts";
+import { handleCreateSession } from "../src/handlers/createSession";
+import { handleSessionStatus, SessionStatusDeps } from "../src/handlers/sessionStatus";
+import { HandlerRequest } from "../src/handlers/http";
+import { InMemoryRateLimiter } from "../src/domain/rateLimit";
+import { hashCheckoutToken } from "../src/domain/tokens";
+import { InMemorySessionStore } from "./helpers/memoryStore";
 
 const BOT_SECRET = "bot-secret-at-least-16-characters";
 const TOKEN_SECRET = "token-secret-at-least-16-chars";

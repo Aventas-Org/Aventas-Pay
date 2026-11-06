@@ -3,7 +3,7 @@
  *
  * Policy (enforced by redact() and covered by tests):
  *   - Never log: checkout tokens, token hashes, API secrets, Authorization
- *     headers, UPI VPAs, full request/response bodies.
+ *     headers, UPI VPAs, provider transaction/receipt references, full bodies.
  *   - Never log: Discord user IDs. Correlation uses the order_id, which staff
  *     already use operationally.
  *   - Always log: event name, outcome, HTTP status, latency, attempt counts.
@@ -30,6 +30,17 @@ const SECRET_KEYS = new Set([
   "vpa",
   "discord_user_id",
   "discorduserid",
+  // Provider/bank receipt identifiers can be 4–39 characters: never rely
+  // on the generic 40-character bearer heuristic to suppress them.
+  "provider_transaction_ref",
+  "provider_ref",
+  "provider_payment_id",
+  "transaction_id",
+  "payment_reference",
+  "receipt_reference",
+  "bank_reference",
+  "utr",
+  "receipt_id",
 ]);
 
 /** Long credential-like strings get masked even under innocent key names. */

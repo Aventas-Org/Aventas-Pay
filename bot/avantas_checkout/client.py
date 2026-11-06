@@ -24,6 +24,7 @@ import random
 import re
 import time
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Any, Awaitable, Callable, Mapping
 
 import aiohttp
@@ -193,7 +194,7 @@ class CheckoutClient:
         )
         if status not in (200, 201):
             self._raise_for_status(status, body)
-        result = self._parse_session_response(body, order)
+        result = self._parse_session_response(body, order, profile)
         _log(
             "session_ready",
             order_id=order.order_id,
@@ -233,29 +234,6 @@ class CheckoutClient:
             raise InvalidSessionResponse("cancel response is not an object")
         return body
 
-    async def verify_checkout_session(
-        self, order_id: str, provider_transaction_ref: str
-    ) -> dict[str, Any]:
-        """Authorized server-to-server payment verification (bot -> website).
-
-        Called after staff approval or Slice email auto-verification matches the payment.
-        """
-        self._require_enabled()
-        status, body = await self._request_json(
-            "POST",
-            "/api/payments/checkout-sessions/verify",
-            json_body={
-                "order_id": order_id,
-                "provider_transaction_ref": provider_transaction_ref,
-            },
-            context={"order_id": order_id},
-        )
-        if status != 200:
-            self._raise_for_status(status, body)
-        if not isinstance(body, dict):
-            raise InvalidSessionResponse("verify response is not an object")
-        return body
-
     # ------------------------------------------------------------ internals
 
     def _require_enabled(self) -> None:
@@ -289,6 +267,13 @@ class CheckoutClient:
             self._session = aiohttp.ClientSession(timeout=timeout)
             self._owns_session = True
 
+        # Public status paths contain a bearer capability, including tokens
+        # shorter than the generic log redactor recognises. Log the route only.
+        log_path = path
+        prefix = "/api/payments/checkout-sessions/"
+        if method == "GET" and path.startswith(prefix):
+            log_path = prefix + "[REDACTED]"
+
         attempts = self._config.max_retries + 1
         ctx = dict(context or {})
         last_error: str = "unknown"
@@ -300,6 +285,8 @@ class CheckoutClient:
                     f"{self._config.api_url}{path}",
                     json=json_body,
                     headers=self._headers(),
+                    # Never forward payment data or credentials through a redirect.
+                    allow_redirects=False,
                 ) as resp:
                     body: Any
                     try:
@@ -310,7 +297,7 @@ class CheckoutClient:
                         _log(
                             "http_response",
                             method=method,
-                            path=path,
+                            path=log_path,
                             http_status=resp.status,
                             attempt=attempt + 1,
                             **ctx,
@@ -331,7 +318,7 @@ class CheckoutClient:
             _log(
                 "retrying",
                 method=method,
-                path=path,
+                path=log_path,
                 attempt=attempt + 1,
                 delay_ms=int(delay * 1000),
                 reason=last_error,
@@ -342,7 +329,7 @@ class CheckoutClient:
         _log(
             "request_failed",
             method=method,
-            path=path,
+            path=log_path,
             attempts=attempts,
             reason=last_error,
             **ctx,
@@ -377,8 +364,9 @@ class CheckoutClient:
             raise CheckoutAuthError(f"rejected by website (status {status})")
         raise CheckoutApiError(status, code)
 
-    @staticmethod
-    def _parse_session_response(body: Any, order: OrderFacts) -> CheckoutSessionResult:
+    def _parse_session_response(
+        self, body: Any, order: OrderFacts, profile: PaymentProfile
+    ) -> CheckoutSessionResult:
         if not isinstance(body, dict):
             raise InvalidSessionResponse("create response is not an object")
         required = {
@@ -393,9 +381,44 @@ class CheckoutClient:
                 raise InvalidSessionResponse(f"missing or invalid field {field!r}")
         if body["order_ref"] != order.order_id:
             raise InvalidSessionResponse("response order_ref does not match request")
+        # A URL must never be displayed when the Worker echoes a different
+        # payment fact than the bot's persisted, post-wallet order/profile.
+        if (
+            type(body.get("amount_paise")) is not int
+            or body["amount_paise"] != order.amount_paise
+            or body.get("currency") != order.currency
+        ):
+            raise InvalidSessionResponse("checkout amount or currency mismatch")
+        product = body.get("product")
+        if not isinstance(product, dict) or product.get("name") != order.product_name:
+            raise InvalidSessionResponse("checkout product mismatch")
+        upi = body.get("upi")
+        if (
+            not isinstance(upi, dict)
+            or upi.get("vpa") != profile.vpa
+            or upi.get("display_name") != profile.display_name
+        ):
+            raise InvalidSessionResponse("checkout payee mismatch")
+        if body["session_status"] != "PENDING":
+            raise InvalidSessionResponse("checkout is not pending")
+        if type(body.get("reused")) is not bool:
+            raise InvalidSessionResponse("invalid replay indicator")
+        # The Worker emits ISO-8601 UTC dates. Reject malformed/local dates,
+        # but do not decide payment status from the bot's wall clock.
+        expiry_text = body["expires_at"]
+        try:
+            if not expiry_text.endswith("Z"):
+                raise ValueError("not UTC")
+            expiry = datetime.fromisoformat(expiry_text.replace("Z", "+00:00"))
+            if expiry.utcoffset() != timedelta(0):
+                raise ValueError("not UTC")
+        except ValueError:
+            raise InvalidSessionResponse("invalid checkout expiry") from None
         token = body["checkout_token"]
-        if len(token) < 32:
-            raise InvalidSessionResponse("checkout token too short")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{43}", token):
+            raise InvalidSessionResponse("invalid checkout token")
+        if body["checkout_url"] != self.build_checkout_page_url(token):
+            raise InvalidSessionResponse("checkout URL does not match configured website origin")
         return CheckoutSessionResult(
             session_id=str(body.get("session_id", "")),
             order_id=body["order_ref"],
@@ -403,7 +426,7 @@ class CheckoutClient:
             checkout_token=token,
             status=body["session_status"],
             expires_at=body["expires_at"],
-            reused=bool(body.get("reused", False)),
+            reused=body["reused"],
         )
 
 

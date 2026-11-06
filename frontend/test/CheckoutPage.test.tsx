@@ -10,7 +10,14 @@ import { join } from "node:path";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { CheckoutPage } from "../src/CheckoutPage";
 
-afterEach(cleanup);
+import { mockSnapshot } from "../src/mockApi";
+import { DEFAULT_POLLER_CONFIG } from "../src/lib/checkoutPoller";
+const originalFetch = globalThis.fetch;
+afterEach(() => {
+  cleanup();
+  globalThis.fetch = originalFetch;
+  DEFAULT_POLLER_CONFIG.baseIntervalMs = 5000;
+});
 
 /** Renders and waits for the loading skeleton to resolve into a real state. */
 async function renderState(mock: string) {
@@ -51,8 +58,8 @@ describe("CheckoutPage states", () => {
 
   test("confirmed state renders the confirmed banner and hides payment steps", async () => {
     await renderState("paid");
-    expect(screen.getByText(/payment received/i)).toBeTruthy();
-    expect(screen.getByText(/Payment confirmed/i)).toBeTruthy();
+    expect(screen.getAllByText(/Payment verified by Aventas staff/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/payment received/i)).toBeNull();
     expect(screen.queryByText(/Scan with any UPI app/i)).toBeNull();
   });
 
@@ -63,12 +70,13 @@ describe("CheckoutPage states", () => {
     expect(screen.queryByText(/Scan with any UPI app/i)).toBeNull();
   });
 
-  test("unavailable state offers retry and reassures the order is safe", async () => {
+  test("unavailable state refreshes status without encouraging duplicate payment", async () => {
     const { container } = await renderState("error");
     expect(screen.getByRole("alert")).toBeTruthy();
     expect(screen.getByText(/Checkout is temporarily unavailable/i)).toBeTruthy();
-    expect(screen.getByText(/your order is safe/i)).toBeTruthy();
-    const retry = screen.getByRole("button", { name: /Retry/i });
+    expect(screen.getByText(/do not pay again/i)).toBeTruthy();
+    expect(screen.queryByText(/no payment has been taken/i)).toBeNull();
+    const retry = screen.getByRole("button", { name: /Refresh status/i });
     // Clicking retry re-enters loading without crashing.
     fireEvent.click(retry);
     expect(container.textContent).toContain("Aventas");
@@ -130,5 +138,70 @@ describe("token hygiene", () => {
     );
     expect(html).toContain('<meta name="referrer" content="no-referrer" />');
     expect(html).toContain('content="noindex, nofollow"');
+  });
+});
+
+
+describe("fail-closed payment instructions", () => {
+  function serve(payload: unknown) {
+    globalThis.fetch = (async () => new Response(JSON.stringify(payload), {
+      headers: { "content-type": "application/json" },
+    })) as typeof fetch;
+    return render(<CheckoutPage token="TESTTOKENAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" />);
+  }
+
+  function expectNoPaymentInstructions() {
+    expect(screen.queryByRole("button", { name: /^Copy$/ })).toBeNull();
+    expect(screen.queryByAltText(/UPI payment QR code/i)).toBeNull();
+    expect(screen.queryByText("avantas@okhdfcbank")).toBeNull();
+    expect(screen.queryByText(/Scan with any UPI app/i)).toBeNull();
+  }
+
+  test("mismatched QR hides VPA, copy and payment steps", async () => {
+    serve({ ...mockSnapshot("pending"), qr_payload: "upi://pay?pa=attacker%40upi" });
+    await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+    expectNoPaymentInstructions();
+    expect(screen.getByText(/Do not pay using this page/i)).toBeTruthy();
+  });
+
+  test("status-only malformed response cannot crash the page or expose payment steps", async () => {
+    serve({ status: "PENDING", expires_at: new Date(Date.now() + 60000).toISOString() });
+    await waitFor(() => expect(screen.getByText(/Checkout is temporarily unavailable/i)).toBeTruthy());
+    expectNoPaymentInstructions();
+  });
+
+  test("cancelled session hides all instructions and warns against paying twice", async () => {
+    serve({ ...mockSnapshot("pending"), status: "CANCELLED" });
+    await waitFor(() => expect(screen.getByText(/Session expired/i)).toBeTruthy());
+    expectNoPaymentInstructions();
+    expect(screen.getByText(/ask staff to reconcile/i)).toBeTruthy();
+  });
+
+  test("past expiry with PENDING status cannot display instructions", async () => {
+    serve({ ...mockSnapshot("expired"), status: "PENDING" });
+    await waitFor(() => expect(screen.getByText(/Session expired/i)).toBeTruthy());
+    expectNoPaymentInstructions();
+  });
+
+  test("local expiry hides instructions before the next poll", async () => {
+    serve({ ...mockSnapshot("pending"), expires_at: new Date(Date.now() + 250).toISOString() });
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Copy$/ })).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Session expired/i)).toBeTruthy());
+    expectNoPaymentInstructions();
+  });
+
+  test("failed refresh immediately hides previously valid payment instructions", async () => {
+    DEFAULT_POLLER_CONFIG.baseIntervalMs = 80;
+    let calls = 0;
+    const pending = mockSnapshot("pending");
+    globalThis.fetch = (async () => {
+      if (++calls > 1) throw new Error("offline");
+      return new Response(JSON.stringify(pending));
+    }) as typeof fetch;
+    render(<CheckoutPage token="TESTTOKENAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Copy$/ })).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Checkout is temporarily unavailable/i)).toBeTruthy());
+    expectNoPaymentInstructions();
+    expect(screen.getByText(/do not pay again/i)).toBeTruthy();
   });
 });

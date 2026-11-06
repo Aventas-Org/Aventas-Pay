@@ -25,18 +25,18 @@
  *   * CANCELLED/unknown -> 409/404 respectively.
  */
 
-import type { Clock, SessionStore } from "../domain/types.ts";
-import { conflict, notFound, rateLimited, validationError } from "../domain/errors.ts";
-import { IllegalTransition, recordTrustedPayment } from "../domain/stateMachine.ts";
-import { deriveIdempotencyKey } from "../domain/idempotency.ts";
-import { nullLogger } from "../domain/log.ts";
-import type { CheckoutLogger } from "../domain/log.ts";
-import type { RateLimiter } from "../domain/rateLimit.ts";
-import { ConstraintViolation } from "../adapters/sqlPort.ts";
-import { dispatch, jsonResponse, parseJsonBody } from "./http.ts";
-import type { HandlerRequest, HandlerResponse } from "./http.ts";
-import { requireBotAuth } from "./auth.ts";
-import { toPublicSessionView } from "./view.ts";
+import type { Clock, SessionStore } from "../domain/types";
+import { conflict, notFound, rateLimited, validationError } from "../domain/errors";
+import { IllegalTransition, recordTrustedPayment } from "../domain/stateMachine";
+import { deriveIdempotencyKey } from "../domain/idempotency";
+import { nullLogger } from "../domain/log";
+import type { CheckoutLogger } from "../domain/log";
+import type { RateLimiter } from "../domain/rateLimit";
+import { ConstraintViolation } from "../adapters/sqlPort";
+import { dispatch, jsonResponse, parseJsonBody } from "./http";
+import type { HandlerRequest, HandlerResponse } from "./http";
+import { requireBotAuth } from "./auth";
+import { toPublicSessionView } from "./view";
 
 export interface VerifySessionDeps {
   store: SessionStore;
@@ -119,6 +119,9 @@ async function verifySessionImpl(
       providerRef,
       deps.clock,
     );
+    if (updated.status !== "PAID" || updated.providerTransactionRef !== providerRef) {
+      throw conflict();
+    }
     logger.log("verify_recorded", {
       order_id: orderId,
       provider_transaction_ref: providerRef,

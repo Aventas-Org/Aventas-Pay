@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { handleCreateSession, CreateSessionDeps } from "../src/handlers/createSession.ts";
-import { handleCancelSession } from "../src/handlers/cancelSession.ts";
-import { HandlerRequest } from "../src/handlers/http.ts";
-import { InMemoryRateLimiter } from "../src/domain/rateLimit.ts";
-import { InMemorySessionStore } from "./helpers/memoryStore.ts";
+import { handleCreateSession, CreateSessionDeps } from "../src/handlers/createSession";
+import { handleCancelSession } from "../src/handlers/cancelSession";
+import { HandlerRequest } from "../src/handlers/http";
+import { InMemoryRateLimiter } from "../src/domain/rateLimit";
+import { InMemorySessionStore } from "./helpers/memoryStore";
 
 const BOT_SECRET = "bot-secret-at-least-16-characters";
 

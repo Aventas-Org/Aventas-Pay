@@ -11,8 +11,8 @@
  *   - buckets prune themselves when they roll over.
  */
 
-import type { RateLimiter } from "../domain/rateLimit.ts";
-import type { SqlExecutor } from "./sqlPort.ts";
+import type { RateLimiter } from "../domain/rateLimit";
+import type { SqlExecutor } from "./sqlPort";
 
 const UPSERT_SQL = `
 INSERT INTO checkout_rate_limits (bucket, window_start_ms, count)

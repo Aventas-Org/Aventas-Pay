@@ -1,0 +1,54 @@
+name: Clean up merged branches
+
+on:
+  pull_request:
+    types: [closed]
+  push:
+    branches: [main]
+    paths: [.github/workflows/cleanup-merged-branches.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: merged-branch-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - name: Delete only unchanged merged feature branches
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            // One-time catch-up is limited to branches completed in this release.
+            const catchUp = new Set(["fix/checkout-safe-error-logging-20261106","docs/complete-pay-release-program-20261106","fix/checkout-client-transport-20261106","fix/checkout-safe-ui-and-audits-20261106","fix/checkout-approved-origins-20261106","ci/cleanup-merged-branches-20261106"]);
+            const pulls = context.eventName === 'pull_request'
+              ? [context.payload.pull_request]
+              : await github.paginate(github.rest.pulls.list, { owner, repo, state: 'closed', per_page: 100 });
+            for (const pr of pulls) {
+              const branch = pr.head?.ref;
+              if (!pr.merged_at || pr.head?.repo?.full_name !== owner + '/' + repo ||
+                  pr.base?.ref !== 'main' || !branch || branch === 'main' ||
+                  branch === context.payload.repository.default_branch ||
+                  (context.eventName !== 'pull_request' && !catchUp.has(branch))) continue;
+              try {
+                const ref = await github.rest.git.getRef({ owner, repo, ref: 'heads/' + branch });
+                if (ref.data.object.sha !== pr.head.sha) {
+                  core.warning('Keeping advanced branch: ' + branch);
+                  continue;
+                }
+                await github.rest.git.deleteRef({ owner, repo, ref: 'heads/' + branch });
+                core.info('Deleted merged branch: ' + branch);
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                core.info('Branch already absent: ' + branch);
+              }
+            }

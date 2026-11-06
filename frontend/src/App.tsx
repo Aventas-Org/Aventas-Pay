@@ -1,78 +1,28 @@
-import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
-import { ToastProvider, DateRangeProvider } from './components/ui.jsx';
-import Layout from './components/Layout.jsx';
-import Dashboard from './pages/Dashboard.jsx';
-import Products from './pages/Products.jsx';
-import Transactions from './pages/Transactions.jsx';
-import Orders from './pages/Orders.jsx';
-import Emails from './pages/Emails.jsx';
-import Analytics from './pages/Analytics.jsx';
-import ManualReview from './pages/ManualReview.jsx';
-import Settings from './pages/Settings.jsx';
-import DirectPay from './pages/DirectPay.jsx';
-import EmbedCheckout from './pages/EmbedCheckout.jsx';
-import Login from './pages/Login.jsx';
-import { CheckoutPage } from './CheckoutPage';
+import { CheckoutPage } from "./CheckoutPage";
 
-function AdminGuard({ children }: { children: React.ReactNode }) {
-  const adminKey = localStorage.getItem('aventas_admin_key');
-  if (!adminKey) {
-    return <Navigate to="/login" replace />;
-  }
-  return <>{children}</>;
-}
-
-function CheckoutRoute() {
-  const { token } = useParams<{ token: string }>();
+/**
+ * Minimal path routing: /checkout/:token. The Aventas-website transplant will
+ * mount <CheckoutPage token={...} apiBase={...}/> inside its existing router.
+ */
+export default function App() {
+  const match = window.location.pathname.match(/^\/checkout\/([A-Za-z0-9_-]+)$/);
+  const token = match?.[1] ?? null;
   const params = new URLSearchParams(window.location.search);
-  const mock = params.get('mock');
+  const mock = params.get("mock");
 
   if (!token) {
-    return <Navigate to="/" replace />;
+    return (
+      <main className="min-h-screen flex items-center justify-center px-6">
+        <div className="max-w-md w-full rounded-2xl border border-avantas-edge bg-avantas-panel/80 p-8 text-center">
+          <h1 className="font-display text-xl font-semibold text-white">Aventas Checkout</h1>
+          <p className="mt-3 text-sm text-avantas-muted">
+            This link is incomplete. Open the checkout link from your Aventas order again, or
+            contact support with your order reference.
+          </p>
+        </div>
+      </main>
+    );
   }
 
-  // Customer-facing page: no admin chrome, no links back to the dashboard.
   return <CheckoutPage token={token} mock={mock} />;
-}
-
-export default function App() {
-  return (
-    <ToastProvider>
-      <DateRangeProvider>
-        <BrowserRouter>
-          <Routes>
-          {/* Admin Login Route */}
-          <Route path="/login" element={<Login />} />
-
-          {/* Protected Admin Dashboard Routes */}
-          <Route
-            path="/"
-            element={
-              <AdminGuard>
-                <Layout />
-              </AdminGuard>
-            }
-          >
-            <Route index element={<Dashboard />} />
-            <Route path="products" element={<Products />} />
-            <Route path="transactions" element={<Transactions />} />
-            <Route path="orders" element={<Orders />} />
-            <Route path="emails" element={<Emails />} />
-            <Route path="analytics" element={<Analytics />} />
-            <Route path="manual-review" element={<ManualReview />} />
-            <Route path="settings" element={<Settings />} />
-          </Route>
-
-          {/* Public Customer Checkout Routes */}
-          <Route path="/pay/:productId" element={<DirectPay />} />
-          <Route path="/embed/:productId" element={<EmbedCheckout />} />
-          <Route path="/checkout/:token" element={<CheckoutRoute />} />
-
-          {/* Fallback */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
-      </DateRangeProvider>
-    </ToastProvider>
-  );
 }

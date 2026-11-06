@@ -12,7 +12,7 @@ import {
   classifyConstraintError,
   SqlExecutor,
   SqlValue,
-} from "../../src/adapters/sqlPort.ts";
+} from "../../src/adapters/sqlPort";
 
 export function openDatabase(): Database {
   return new Database(":memory:", { create: true });
