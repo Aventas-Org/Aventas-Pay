@@ -31,3 +31,14 @@ CI cannot prove deployed Worker/D1 isolation, Discord delivery, durable outbox
 recovery, merchant settlement, or operational/legal approval. Issues #8–10,
 #15–17 and #19–23 retain their acceptance gates. Production payment flags and GST
 remain subject to their existing release controls.
+
+## Measured regression coverage floor (2026-11-06)
+
+The initial coverage-enabled head run of Pay [PR #36](https://github.com/Aventas-Org/Aventas-Pay/pull/36) was green. CI logs reported:
+
+| Surface | Tests | Function coverage | Line coverage | Minimum per-file functions | Minimum per-file lines |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Canonical checkout Worker/API TypeScript | 141 passed, 0 failed | 97.40% | 99.33% | 75% | 90% |
+| Standalone checkout UI/QR/poller | 44 passed, 0 failed | 95.91% | 99.07% | 80% | 90% |
+
+`bun test --coverage` enforces the configured thresholds per file and fails CI if a covered file falls below the floor. The thresholds deliberately leave headroom for error-path work and include test helper modules where Bun includes them. Coverage numbers are **unit/integration-in-process metrics**, not evidence of browser compatibility, Cloudflare staging, Discord guild behavior, correct settlement or legal compliance. Baseline is not an authorization to activate hosted checkout.
