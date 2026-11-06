@@ -38,13 +38,13 @@ jobs:
         run: python -m bandit -r bot/avantas_checkout -ll
       - name: Website tests and typecheck
         run: |
-          (cd website && bun test && bun run typecheck)
+          (cd website && bun test --coverage && bun run typecheck)
       - name: Bot and cross-system tests
         run: |
           (cd bot && python -m pytest -q)
       - name: Frontend tests and typecheck
         run: |
-          (cd frontend && bun test && bun run typecheck && bun run build)
+          (cd frontend && bun test --coverage && bun run typecheck && bun run build)
       - name: Audit installed Python dependencies
         run: python -m pip_audit --local --progress-spinner off
       - name: Audit resolved client and test requirements
