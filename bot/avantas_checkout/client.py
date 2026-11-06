@@ -24,6 +24,7 @@ import random
 import re
 import time
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Any, Awaitable, Callable, Mapping
 
 import aiohttp
@@ -193,7 +194,7 @@ class CheckoutClient:
         )
         if status not in (200, 201):
             self._raise_for_status(status, body)
-        result = self._parse_session_response(body, order)
+        result = self._parse_session_response(body, order, profile)
         _log(
             "session_ready",
             order_id=order.order_id,
@@ -363,7 +364,9 @@ class CheckoutClient:
             raise CheckoutAuthError(f"rejected by website (status {status})")
         raise CheckoutApiError(status, code)
 
-    def _parse_session_response(self, body: Any, order: OrderFacts) -> CheckoutSessionResult:
+    def _parse_session_response(
+        self, body: Any, order: OrderFacts, profile: PaymentProfile
+    ) -> CheckoutSessionResult:
         if not isinstance(body, dict):
             raise InvalidSessionResponse("create response is not an object")
         required = {
@@ -378,8 +381,41 @@ class CheckoutClient:
                 raise InvalidSessionResponse(f"missing or invalid field {field!r}")
         if body["order_ref"] != order.order_id:
             raise InvalidSessionResponse("response order_ref does not match request")
+        # A URL must never be displayed when the Worker echoes a different
+        # payment fact than the bot's persisted, post-wallet order/profile.
+        if (
+            type(body.get("amount_paise")) is not int
+            or body["amount_paise"] != order.amount_paise
+            or body.get("currency") != order.currency
+        ):
+            raise InvalidSessionResponse("checkout amount or currency mismatch")
+        product = body.get("product")
+        if not isinstance(product, dict) or product.get("name") != order.product_name:
+            raise InvalidSessionResponse("checkout product mismatch")
+        upi = body.get("upi")
+        if (
+            not isinstance(upi, dict)
+            or upi.get("vpa") != profile.vpa
+            or upi.get("display_name") != profile.display_name
+        ):
+            raise InvalidSessionResponse("checkout payee mismatch")
+        if body["session_status"] != "PENDING":
+            raise InvalidSessionResponse("checkout is not pending")
+        if type(body.get("reused")) is not bool:
+            raise InvalidSessionResponse("invalid replay indicator")
+        # The Worker emits ISO-8601 UTC dates. Reject malformed/local dates,
+        # but do not decide payment status from the bot's wall clock.
+        expiry_text = body["expires_at"]
+        try:
+            if not expiry_text.endswith("Z"):
+                raise ValueError("not UTC")
+            expiry = datetime.fromisoformat(expiry_text.replace("Z", "+00:00"))
+            if expiry.utcoffset() != timedelta(0):
+                raise ValueError("not UTC")
+        except ValueError:
+            raise InvalidSessionResponse("invalid checkout expiry") from None
         token = body["checkout_token"]
-        if not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", token):
+        if not re.fullmatch(r"[A-Za-z0-9_-]{43}", token):
             raise InvalidSessionResponse("invalid checkout token")
         if body["checkout_url"] != self.build_checkout_page_url(token):
             raise InvalidSessionResponse("checkout URL does not match configured website origin")
@@ -390,7 +426,7 @@ class CheckoutClient:
             checkout_token=token,
             status=body["session_status"],
             expires_at=body["expires_at"],
-            reused=bool(body.get("reused", False)),
+            reused=body["reused"],
         )
 
 
