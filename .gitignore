@@ -2,3 +2,6 @@ node_modules/
 __pycache__/
 .pytest_cache/
 .venv/
+
+# Rebuild standalone demo assets from reviewed source.
+frontend/dist/

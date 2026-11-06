@@ -32,9 +32,17 @@ export function CheckoutPage({ token, mock }: Props) {
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
 
   const applySession = useCallback((next: PublicSessionView) => {
+    if (!next || typeof next.order_ref !== "string" || typeof next.product?.name !== "string" ||
+        !Number.isSafeInteger(next.amount_paise) || next.amount_paise <= 0 ||
+        next.currency !== "INR" || typeof next.upi?.vpa !== "string" ||
+        typeof next.upi?.display_name !== "string" || typeof next.qr_payload !== "string") {
+      setSession(null);
+      setPhase("unavailable");
+      return;
+    }
     setSession(next);
     if (next.status === "PAID") setPhase("confirmed");
-    else if (next.status === "EXPIRED" || next.status === "CANCELLED") setPhase("expired");
+    else if (next.status === "EXPIRED" || next.status === "CANCELLED" || Date.parse(next.expires_at) <= Date.now()) setPhase("expired");
     else setPhase("awaiting");
   }, []);
 
@@ -84,15 +92,13 @@ export function CheckoutPage({ token, mock }: Props) {
             applySession(outcome.snapshot as unknown as PublicSessionView);
           }
           else if (outcome?.kind === "error" && state.consecutiveFailures >= 1) {
-            // Keep showing the last good data; only go unavailable with nothing.
-            setSession((prev) => {
-              if (prev === null) setPhase("unavailable");
-              return prev;
-            });
+            // Stale data cannot authorise another payment.
+            setPhase("unavailable");
+            setQrDataUrl(null);
           }
         },
-        onStop: () => {
-          /* terminal handling happens via onState phases */
+        onStop: (reason) => {
+          if (!cancelled && reason === "expired") setPhase("expired");
         },
       },
       DEFAULT_POLLER_CONFIG,
@@ -109,6 +115,17 @@ export function CheckoutPage({ token, mock }: Props) {
       poller.stop();
     };
   }, [token, mockScenario, retryNonce, applySession]);
+
+  // Expiry must hide instructions even if the next request never succeeds.
+  useEffect(() => {
+    if (!session || session.status !== "PENDING") return;
+    const timer = setTimeout(() => setPhase("expired"),
+      Math.max(0, Math.min(2_147_483_647, Date.parse(session.expires_at) - Date.now())));
+    return () => clearTimeout(timer);
+  }, [session]);
+
+  const canPay = phase === "awaiting" && session?.status === "PENDING" &&
+    Date.parse(session.expires_at) > Date.now() && verifyQrMatchesSession(session);
 
   // Render the QR strictly from the server-provided payload, verifying it
   // against the stored session details first.
@@ -141,7 +158,7 @@ export function CheckoutPage({ token, mock }: Props) {
   }, [session]);
 
   const copyUpi = useCallback(async () => {
-    if (!session) return;
+    if (!session || !canPay) return;
     const vpa = session.upi.vpa;
     try {
       if (navigator.clipboard?.writeText) {
@@ -171,7 +188,7 @@ export function CheckoutPage({ token, mock }: Props) {
       setCopyMessage("Copy failed — please select the UPI ID manually");
       setTimeout(() => setCopyMessage(null), 4000);
     }
-  }, [session]);
+  }, [session, canPay]);
 
   const retry = useCallback(() => setRetryNonce((n) => n + 1), []);
 
@@ -248,15 +265,14 @@ function UnavailableCard({ onRetry }: { onRetry: () => void }) {
         Checkout is temporarily unavailable
       </h2>
       <p className="mt-2 text-sm leading-relaxed text-avantas-muted">
-        We couldn&apos;t reach the payment service. This is usually brief — your order is safe and
-        no payment has been taken. You can also pay using the UPI ID from your original Discord
-        order message.
+        We couldn&apos;t confirm the latest order status. If already paid or debited, do not pay
+        again. Ask Aventas staff in Discord to check your order before retrying payment.
       </p>
       <button
         onClick={onRetry}
         className="mt-5 w-full rounded-xl bg-avantas-accent px-4 py-2.5 font-semibold text-avantas-ink transition hover:bg-avantas-accentDim hover:text-white focus:outline-none focus:ring-2 focus:ring-avantas-accent/60"
       >
-        Retry
+        Refresh status
       </button>
     </section>
   );
@@ -281,6 +297,8 @@ function SessionCard({
 }) {
   const confirmed = phase === "confirmed";
   const expired = phase === "expired";
+  const payable = phase === "awaiting" && session.status === "PENDING" &&
+    Date.parse(session.expires_at) > Date.now() && verifyQrMatchesSession(session);
 
   return (
     <section className="overflow-hidden rounded-2xl border border-avantas-edge bg-avantas-panel/80 shadow-2xl shadow-black/40">
@@ -302,7 +320,7 @@ function SessionCard({
 
         <p className="mt-3 text-sm text-avantas-muted">{session.product.name}</p>
 
-        {!confirmed && !expired && (
+        {payable && (
           <>
             <div className="mt-5 rounded-xl border border-avantas-edge bg-avantas-ink/60 p-4">
               <div className="flex items-center justify-between gap-3">
@@ -333,7 +351,7 @@ function SessionCard({
               ) : (
                 <div className="grid h-[248px] w-[248px] place-items-center rounded-xl border border-dashed border-avantas-edge bg-avantas-ink/40 text-center text-xs text-avantas-muted">
                   {qrMismatch
-                    ? "Payment code could not be verified. Please use the UPI ID above."
+                    ? "Payment instructions could not be verified. Contact Aventas staff."
                     : "Preparing payment code…"}
                 </div>
               )}
@@ -359,9 +377,16 @@ function SessionCard({
           </>
         )}
 
+        {!confirmed && !expired && !payable && (
+          <p role="alert" className="mt-5 text-sm text-avantas-warn">
+            Payment instructions could not be verified. Do not pay using this page.
+            If already debited, do not pay again; contact Aventas staff in Discord.
+          </p>
+        )}
+
         {confirmed && (
           <div className="mt-5 rounded-xl border border-avantas-accent/40 bg-avantas-accent/10 p-4">
-            <p className="font-semibold text-avantas-accent">Payment confirmed</p>
+            <p className="font-semibold text-avantas-accent">Payment verified by Aventas staff</p>
             <p className="mt-1 text-sm text-avantas-muted">
               Your order has been recorded. Delivery follows in Discord — no further action is
               needed on this page.
@@ -374,7 +399,8 @@ function SessionCard({
             <p className="font-semibold text-avantas-warn">This checkout session has expired</p>
             <p className="mt-1 text-sm text-avantas-muted">
               For your security, payment links expire. Please return to your Aventas order in
-              Discord and request a fresh checkout link — do not send payment to this page.
+              Discord — do not send payment to this page. If already paid or debited, do not pay
+              again; ask staff to reconcile your order before requesting a new link.
             </p>
           </div>
         )}
@@ -397,7 +423,7 @@ function StatusBanner({
         aria-live="polite"
         className="flex items-center gap-2 bg-avantas-accent/15 px-6 py-3 text-sm font-semibold text-avantas-accent"
       >
-        <span aria-hidden>✓</span> Awaiting confirmation from Discord — payment received
+        <span aria-hidden>✓</span> Payment verified by Aventas staff — delivery continues in Discord
       </div>
     );
   }

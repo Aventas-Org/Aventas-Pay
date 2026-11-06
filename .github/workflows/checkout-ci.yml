@@ -13,6 +13,9 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -30,4 +33,8 @@ jobs:
           (cd bot && python -m pytest -q)
       - name: Frontend tests and typecheck
         run: |
-          (cd frontend && bun test && bun run typecheck)
+          (cd frontend && bun test && bun run typecheck && bun run build)
+      - name: Audit JavaScript dependencies
+        run: |
+          (cd website && bun audit)
+          (cd frontend && bun audit)
