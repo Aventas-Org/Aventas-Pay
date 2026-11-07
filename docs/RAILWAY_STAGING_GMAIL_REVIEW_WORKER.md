@@ -10,7 +10,7 @@ credentials. It never calls `/verify`. It is not a payment provider.
 GitHub repo: `Aventas-Org/Aventas-Pay`.
 Railway service: `aventas-gmail-review-staging`, in the **staging**
 environment only. Set the root directory to `website` and start command
-`bun run src/bin/staging-gmail-review-worker.ts`. Configure one replica
+`bun run scripts/staging-gmail-review-worker.ts`. Configure one replica
 and attach a persistent `/data` volume (do not share the bot volume).
 Restart on crashes. Do NOT expose a Railway domain.
 

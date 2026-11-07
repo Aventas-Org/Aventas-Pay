@@ -5,7 +5,7 @@ import { join } from "node:path";
 import {
   chooseMode, loadSyntheticStagingOrders, openReviewDb, reviewTick,
   syntheticGoogleTransport,
-} from "../src/bin/staging-gmail-review-worker";
+} from "../src/services/stagingGmailWorkerCore";
 
 const startedAtMs = Date.parse("2026-11-07T08:00:00Z");
 const stage = {

@@ -13,14 +13,14 @@ import { Database } from "bun:sqlite";
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { SqlExecutor, SqlValue } from "../adapters/sqlPort";
-import { stagingReadOnlyGmailReviewTick } from "../services/stagingGmailOAuthReview";
-import type { ReviewOrderSnapshot } from "../services/payment/amountOnlyReview";
+import { stagingReadOnlyGmailReviewTick } from "./stagingGmailOAuthReview";
+import type { ReviewOrderSnapshot } from "./payment/amountOnlyReview";
 
 const STAGING_ACCOUNT = "94080c35924ea4c1cd8b2fba49ddea15";
 const STAGING_DB = "9e298657-2d0f-4dcc-818d-9435386c3050";
 const FIXED_D1_URL =
   `https://api.cloudflare.com/client/v4/accounts/${STAGING_ACCOUNT}/d1/database/${STAGING_DB}/query`;
-const POLL_MS = 10_000;
+export const POLL_MS = 10_000;
 const DB_PATH = "/data/aventas-gmail-review.sqlite3";
 const SYNTHETIC_FROM = "alerts@example.test";
 const SYNTHETIC_TOKEN = "fake-staging-token-no-google-traffic";
@@ -252,51 +252,3 @@ export async function reviewTick(
   };
 }
 
-async function runForever(): Promise<void> {
-  const env: Env = process.env;
-  if (env.APP_ENV !== "staging" || env.RAILWAY_ENVIRONMENT_NAME !== "staging") {
-    console.error("staging_gmail_review_environment_rejected");
-    process.exitCode = 1;
-    return;
-  }
-  const mode = chooseMode(env);
-  // No access to Gmail or bank in disabled/synthetic mode.
-  if (mode === "oauth" && env.RAILWAY_VOLUME_MOUNT_PATH !== "/data") {
-    console.error("staging_gmail_review_durable_volume_required");
-    process.exitCode = 1;
-    return;
-  }
-  const { executor, database } = openReviewDb();
-  const startedAtMs = Date.now();
-  let stopped = false;
-  process.on("SIGTERM", () => { stopped = true; });
-  process.on("SIGINT", () => { stopped = true; });
-  console.info(JSON.stringify({
-    event: "staging_gmail_review_started", mode,
-    intervalSeconds: POLL_MS / 1000, paymentVerified: false, canFulfill: false,
-  }));
-  let cycles = 0;
-  try {
-    while (!stopped) {
-      cycles += 1;
-      try {
-        const result = await reviewTick(executor, env, startedAtMs, Date.now());
-        // Log only counts; no bodies, account IDs, access tokens or transaction refs.
-        if (cycles === 1 || result.queued > 0 || cycles % 30 === 0) {
-          console.info(JSON.stringify({
-            event: "staging_gmail_review_tick", ...result, cycles,
-          }));
-        }
-      } catch {
-        // Do not expose upstream error bodies, OAuth secrets or credit evidence.
-        console.error("staging_gmail_review_tick_unavailable");
-      }
-      if (!stopped) await Bun.sleep(POLL_MS);
-    }
-  } finally {
-    database.close();
-    console.info("staging_gmail_review_stopped");
-  }
-}
-
-if (import.meta.main) await runForever();
