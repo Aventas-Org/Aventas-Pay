@@ -5,9 +5,11 @@
  * exclusively over the dedicated bot secret (constant-time verified). It is
  * designed to be called from the bot's EXISTING verification pipeline at the
  * moment that pipeline has already established payment:
- *   * staff approval by the configured verifier role, or
- *   * the bot's Slice payment-received email auto-verification (IMAP), which
- *     already dedupes one receipt (Slice Message-ID) to one order.
+ *   * an authorized verifier has independently checked the merchant's
+ *     bank/PSP record, exact amount, merchant, order and unique reference.
+ * An email sender/body, Message-ID, screenshot, customer-entered UTR, or QR
+ * scan alone must NEVER trigger this handler. Unsafe heuristic email
+ * auto-approval is disabled by default and is not settlement authority.
  *
  * It records what the trusted bot asserts; it does NOT verify money itself and
  * must never be called on a customer action, a redirect, a polling response or
@@ -94,7 +96,13 @@ async function verifySessionImpl(
   const providerRef = b.provider_transaction_ref as string;
   const now = deps.clock.now();
 
+  // Check already-paid orders first, independently of the idempotency key.
+  // Authenticated create allows caller-supplied keys, so a successful payment
+  // must remain replayable even when that key differs from the default.
+  // Paid takes precedence over any anomalous active row: never acknowledge
+  // a second receipt against an order already recorded as paid.
   const session =
+    (await deps.store.findPaidByOrderId(orderId)) ??
     (await deps.store.findActiveByOrderId(orderId, now)) ??
     (await deps.store.findLatestByIdempotencyKey(deriveIdempotencyKey(orderId)));
   if (!session || session.orderId !== orderId) {
