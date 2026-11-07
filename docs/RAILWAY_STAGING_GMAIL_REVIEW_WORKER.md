@@ -41,15 +41,14 @@ provisioned as **protected staging secrets**:
 - `GMAIL_OAUTH_REFRESH_TOKEN`
 - `GMAIL_CREDIT_ALERT_SENDER` (exact known sender filter, not a trust proof)
 - `GMAIL_MAILBOX_CONNECTION_ID` (opaque non-personal stable identifier)
-- `CLOUDFLARE_D1_READ_TOKEN` (least-privilege restricted token reading
-  only `aventas-staging-db`; never production database)
+- `STAGING_GMAIL_SNAPSHOT_TOKEN` (dedicated high-entropy bearer secret shared only with staging Worker; never use a production account token)
 
 The operator must complete Google's actual OAuth consent flow with
 `gmail.readonly` for the intended mailbox. ChatGPT's existing Gmail
 connector DOES NOT grant or provide an OAuth token to this service and
 must never be copied into Railway.
 
-Each tick first queries the **fixed staging D1 UUID** for server-owned
+Each tick first calls the **fixed, staging-only Worker snapshot endpoint** for server-owned
 synthetic checkout snapshots with source `staging_synthetic_upi`. If
 none exist, the worker deliberately does not read Gmail. If any row is
 malformed or from any other checkout source, the tick fails closed. The
@@ -82,3 +81,12 @@ independent bank-authenticated credit verification source.
 `staging_synthetic_upi`; it will not match real customer orders.
 Turning it on cannot make the product production-ready without
 proper quote/payment binding and independently verified bank settlement.
+
+## Staging snapshot proxy (no Cloudflare account API token)
+
+The worker uses a fixed `POST https://pay-staging.aventasgaming.com/api/internal/staging-gmail-snapshot` endpoint, not the Cloudflare account D1 API. Both sides must have the **same** cryptographically random capability in these private variables:
+
+- Cloudflare `aventas-staging` Worker: `STAGING_GMAIL_SNAPSHOT_SECRET` (secret_text)
+- Railway `aventas-gmail-review-staging`: `STAGING_GMAIL_SNAPSHOT_TOKEN` (private variable)
+
+The endpoint is unavailable in production and exposes only non-PAID synthetic test order records. Never reuse payment credentials or publish this bearer value in git, logs, screenshots or chat.

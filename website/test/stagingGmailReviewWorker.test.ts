@@ -88,27 +88,26 @@ describe("Private Railway staging Gmail read-only review runner", () => {
       }] }],
     });
     const fetcher = (async (url: RequestInfo | URL, init?: RequestInit) => {
-      expect(String(url)).toContain("/d1/database/9e298657-2d0f-4dcc-818d-9435386c3050/query");
+      expect(String(url)).toBe("https://pay-staging.aventasgaming.com/api/internal/staging-gmail-snapshot");
       expect(init?.method).toBe("POST");
-      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer synthetic-read-d1-token");
-      const b = JSON.parse(String(init?.body)) as { sql:string };
-      expect(b.sql).toContain("staging_synthetic_upi");
-      expect(b.sql).not.toContain("UPDATE");
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer synthetic-staging-snapshot-token-strong-01234567890");
+      // Never send client-controlled SQL or other request body.
+      expect(init?.body).toBeUndefined();
       return new Response(JSON.stringify(payload("staging_synthetic_upi")), { status: 200 });
     }) as unknown as typeof fetch;
     const orders = await loadSyntheticStagingOrders(
-      "synthetic-read-d1-token", startedAtMs, fetcher);
+      "synthetic-staging-snapshot-token-strong-01234567890", startedAtMs, fetcher);
     expect(orders).toEqual([{
       orderId: "AVT-TEST-D1", amountPaise: 48024, currency: "INR",
       status: "PENDING", paymentWindowStartMs: startedAtMs - 20_000,
       paymentWindowEndMs: startedAtMs + 100_000,
     }]);
     for (const bad of ["discord_bot", "upi_live", "staging_random"]) {
-      await expect(loadSyntheticStagingOrders("synthetic-read-d1-token", startedAtMs,
+      await expect(loadSyntheticStagingOrders("synthetic-staging-snapshot-token-strong-01234567890", startedAtMs,
         (async () => new Response(JSON.stringify(payload(bad)))) as unknown as typeof fetch))
         .rejects.toThrow("STAGING_SNAPSHOT_UNAVAILABLE");
     }
-    await expect(loadSyntheticStagingOrders("synthetic-read-d1-token", startedAtMs,
+    await expect(loadSyntheticStagingOrders("synthetic-staging-snapshot-token-strong-01234567890", startedAtMs,
       (async () => new Response(JSON.stringify(payload("staging_synthetic_upi", 1.25)))) as unknown as typeof fetch))
       .rejects.toThrow("STAGING_SNAPSHOT_UNAVAILABLE");
   });
@@ -123,7 +122,7 @@ describe("Private Railway staging Gmail read-only review runner", () => {
       GMAIL_OAUTH_REFRESH_TOKEN: "fake-refresh-token-12345",
       GMAIL_CREDIT_ALERT_SENDER: "alerts@example.test",
       GMAIL_MAILBOX_CONNECTION_ID: "gmail-qa-1",
-      CLOUDFLARE_D1_READ_TOKEN: "synthetic-read-d1-token",
+      STAGING_GMAIL_SNAPSHOT_TOKEN: "synthetic-staging-snapshot-token-strong-01234567890",
     };
     expect(chooseMode(full)).toBe("oauth");
     expect(chooseMode({ ...full, GMAIL_OAUTH_REFRESH_TOKEN: undefined })).toBe("disabled");
@@ -135,7 +134,7 @@ describe("Private Railway staging Gmail read-only review runner", () => {
       let requests = 0;
       const fake = (async (url: RequestInfo | URL, init?: RequestInit) => {
         requests += 1;
-        if (String(url).includes("api.cloudflare.com")) {
+        if (String(url).includes("pay-staging.aventasgaming.com/api/internal/")) {
           return new Response(JSON.stringify({ success: true, result: [{ results: [{
             orderId: "AVT-GMAIL-QA-NOPAY", amountPaise: 48024,
             currency: "INR", status: "PENDING",

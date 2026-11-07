@@ -4,7 +4,7 @@
  * Run: bun run src/bin/staging-gmail-review-worker.ts  (from website/)
  * Mode defaults to DISABLED. Synthetic mode uses no network or real mailbox.
  * OAuth mode reads Gmail with gmail.readonly and looks up ONLY synthetic
- * staging checkout snapshots using a read-only Cloudflare D1 credential.
+ * staging checkout snapshots through a restricted Worker bearer endpoint.
  *
  * No PAID transition, UPI funds, customer messages, secrets in logs, QR
  * issuance, or fulfillment. This process has no HTTP listener or public port.
@@ -16,10 +16,8 @@ import type { SqlExecutor, SqlValue } from "../adapters/sqlPort";
 import { stagingReadOnlyGmailReviewTick } from "./stagingGmailOAuthReview";
 import type { ReviewOrderSnapshot } from "./payment/amountOnlyReview";
 
-const STAGING_ACCOUNT = "94080c35924ea4c1cd8b2fba49ddea15";
-const STAGING_DB = "9e298657-2d0f-4dcc-818d-9435386c3050";
-const FIXED_D1_URL =
-  `https://api.cloudflare.com/client/v4/accounts/${STAGING_ACCOUNT}/d1/database/${STAGING_DB}/query`;
+const STAGING_SNAPSHOT_URL =
+  "https://pay-staging.aventasgaming.com/api/internal/staging-gmail-snapshot";
 export const POLL_MS = 10_000;
 const DB_PATH = "/data/aventas-gmail-review.sqlite3";
 const SYNTHETIC_FROM = "alerts@example.test";
@@ -47,7 +45,9 @@ export function chooseMode(env: Env): WorkerMode {
       typeof env.GMAIL_OAUTH_REFRESH_TOKEN === "string" &&
       typeof env.GMAIL_CREDIT_ALERT_SENDER === "string" &&
       typeof env.GMAIL_MAILBOX_CONNECTION_ID === "string" &&
-      typeof env.CLOUDFLARE_D1_READ_TOKEN === "string") return "oauth";
+      typeof env.STAGING_GMAIL_SNAPSHOT_TOKEN === "string" &&
+      env.STAGING_GMAIL_SNAPSHOT_TOKEN.length >= 43 &&
+      env.STAGING_GMAIL_SNAPSHOT_TOKEN.length <= 256) return "oauth";
   return "disabled";
 }
 
@@ -63,31 +63,16 @@ export async function loadSyntheticStagingOrders(
   nowMs: number,
   fetcher: Fetcher = fetch,
 ): Promise<readonly ReviewOrderSnapshot[]> {
-  if (!token || token.length < 15 || token.length > 4096 || !validMs(nowMs)) {
+  if (!token || token.length < 43 || token.length > 256 || !validMs(nowMs)) {
     throw new Error("STAGING_SNAPSHOT_UNAVAILABLE");
   }
-  const sql = `SELECT s.order_id AS orderId, s.amount_paise AS amountPaise,
-            s.currency AS currency, s.status AS status,
-            s.created_at AS paymentWindowStartMs,
-            s.expires_at AS paymentWindowEndMs,
-            s.source AS source
-    FROM checkout_sessions AS s
-    JOIN staging_upi_quote_checkout_links AS l ON l.session_id = s.id
-    WHERE s.source = '${EXPECTED_SOURCE}'
-      AND s.created_at >= ${nowMs - 2 * 24 * 60 * 60 * 1000}
-      AND s.created_at <= ${nowMs}
-    ORDER BY s.created_at DESC LIMIT 1000`;
   let response: Response;
   try {
-    response = await fetcher(FIXED_D1_URL, {
+    response = await fetcher(STAGING_SNAPSHOT_URL, {
       method: "POST",
       redirect: "error",
       cache: "no-store",
-      headers: {
-        "authorization": `Bearer ${token}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ sql }),
+      headers: { authorization: `Bearer ${token}` },
     });
   } catch {
     throw new Error("STAGING_SNAPSHOT_UNAVAILABLE");
@@ -229,7 +214,7 @@ export async function reviewTick(
       paymentVerified: false, canFulfill: false,
     };
   }
-  const token = env.CLOUDFLARE_D1_READ_TOKEN!;
+  const token = env.STAGING_GMAIL_SNAPSHOT_TOKEN!;
   const orders = await loadSyntheticStagingOrders(token, nowMs, fetcher);
   // No authoritative order snapshot = do not access mailbox.
   if (orders.length === 0) return {
