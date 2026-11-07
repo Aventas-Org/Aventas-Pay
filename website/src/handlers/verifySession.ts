@@ -30,7 +30,6 @@
 import type { Clock, SessionStore } from "../domain/types";
 import { conflict, notFound, rateLimited, validationError } from "../domain/errors";
 import { IllegalTransition, recordTrustedPayment } from "../domain/stateMachine";
-import { deriveIdempotencyKey } from "../domain/idempotency";
 import { nullLogger } from "../domain/log";
 import type { CheckoutLogger } from "../domain/log";
 import type { RateLimiter } from "../domain/rateLimit";
@@ -104,7 +103,7 @@ async function verifySessionImpl(
   const session =
     (await deps.store.findPaidByOrderId(orderId)) ??
     (await deps.store.findActiveByOrderId(orderId, now)) ??
-    (await deps.store.findLatestByIdempotencyKey(deriveIdempotencyKey(orderId)));
+    (await deps.store.findLatestByOrderId(orderId));
   if (!session || session.orderId !== orderId) {
     logger.log("verify_rejected", { reason: "unknown_order", order_id: orderId });
     throw notFound();
@@ -114,7 +113,7 @@ async function verifySessionImpl(
   if (session.status === "PAID") {
     if (session.providerTransactionRef === providerRef) {
       logger.log("verify_replayed", { order_id: orderId });
-      return jsonResponse(200, { ...toPublicSessionView(session), status: "PAID" });
+      return jsonResponse(200, { ...toPublicSessionView(session, true), status: "PAID" });
     }
     logger.log("verify_rejected", { reason: "reference_mismatch", order_id: orderId });
     throw conflict();
@@ -135,7 +134,7 @@ async function verifySessionImpl(
       provider_transaction_ref: providerRef,
       amount_paise: updated.amountPaise,
     });
-    return jsonResponse(200, { ...toPublicSessionView(updated), status: "PAID" });
+    return jsonResponse(200, { ...toPublicSessionView(updated, true), status: "PAID" });
   } catch (err) {
     if (err instanceof IllegalTransition) {
       // Expired or otherwise terminal: never revive, reconcile out-of-band.
