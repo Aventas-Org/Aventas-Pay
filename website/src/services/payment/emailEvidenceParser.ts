@@ -18,7 +18,8 @@ export type EvidenceWarning =
   | "UNTRUSTED_EMAIL_SOURCE"
   | "INVALID_OR_OVERSIZED_INPUT"
   | "MISSING_AMOUNT"
-  | "CONFLICTING_AMOUNTS";
+  | "CONFLICTING_AMOUNTS"
+  | "NON_CREDIT_NOTIFICATION";
 
 export interface UntrustedPaymentEvidence {
   readonly classification: "NEEDS_REVIEW";
@@ -83,6 +84,45 @@ function readableBody(body: string): string {
     .replace(/&amp;/gi, "&");
 }
 
+
+/**
+ * Slice credit mail has TWO independent monetary values:
+ * the transaction credit and the AVAILABLE BALANCE. Extracting all ₹ values
+ * therefore rejects real credits or, worse, could attribute the balance.
+ *
+ * Only the exact synthetic template contract below is recognized, and only
+ * for UNTRUSTED review evidence. The sender/subject/body may all be spoofed.
+ */
+const SLICE_SUBJECT = /^Received\s+₹\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s+in your slice account\s*$/i;
+const SLICE_CREDIT_BODY =
+  /\bYou\s+have\s+received\s+₹\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s+via\s+UPI\s+in\s+your\s+slice\s+bank\s+account\b/gi;
+
+function parseSliceCredit(subject: string, body: string): {
+  amountPaise: number | null;
+  warning: EvidenceWarning | null;
+} {
+  if (/\bdebited\s+from\s+your\s+slice\s+account\b/i.test(subject)) {
+    return { amountPaise: null, warning: "NON_CREDIT_NOTIFICATION" };
+  }
+  // An apparent Slice credit must NOT fall back to generic amount extraction
+  // when a field is missing, misspelled, edited, or disagrees with the body.
+  const a = SLICE_SUBJECT.exec(subject);
+  if (!a) return { amountPaise: null, warning: "MISSING_AMOUNT" };
+  const subjectPaise = parsePaise(a[1] ?? "");
+  const anchors = [...body.matchAll(SLICE_CREDIT_BODY)];
+  if (subjectPaise === null || anchors.length !== 1) {
+    return {
+      amountPaise: null,
+      warning: anchors.length > 1 ? "CONFLICTING_AMOUNTS" : "MISSING_AMOUNT",
+    };
+  }
+  const bodyPaise = parsePaise(anchors[0]![1] ?? "");
+  if (bodyPaise === null || bodyPaise !== subjectPaise) {
+    return { amountPaise: null, warning: "CONFLICTING_AMOUNTS" };
+  }
+  return { amountPaise: subjectPaise, warning: null };
+}
+
 export function parseUntrustedPaymentEmail(input: UntrustedPaymentEmail): UntrustedPaymentEvidence {
   const warnings: EvidenceWarning[] = ["UNTRUSTED_EMAIL_SOURCE"];
   // Runtime validation matters even for typed callers: mail is untrusted input.
@@ -96,7 +136,21 @@ export function parseUntrustedPaymentEmail(input: UntrustedPaymentEmail): Untrus
     };
   }
 
-  const text = readableSubject(input.subject) + "\n" + readableBody(input.body);
+  const subject = readableSubject(input.subject);
+  const body = readableBody(input.body);
+  const looksLikeSliceCredit = /\bin your slice account\b/i.test(subject);
+  const looksLikeSliceDebit = /\bdebited from your slice account\b/i.test(subject);
+  if (looksLikeSliceCredit || looksLikeSliceDebit) {
+    const credit = parseSliceCredit(subject, body);
+    if (credit.warning) warnings.push(credit.warning);
+    return {
+      classification: "NEEDS_REVIEW",
+      paymentVerified: false, canFulfill: false,
+      reportedAmountPaise: credit.amountPaise,
+      warnings,
+    };
+  }
+  const text = subject + "\n" + body;
   const amounts = new Set<number>();
   for (const match of text.matchAll(AMOUNT)) {
     const value = parsePaise(match[1] ?? "");

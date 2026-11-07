@@ -48,3 +48,17 @@ live checkout, then separately approve automatic provider settlement.
 
 See [provider settlement contract](VERIFIED_PSP_SETTLEMENT_CONTRACT.md)
 and [staging gates](WORK_REMAINING_BLOCKED.md).
+
+## Slice-specific received amount parsing (read-only)
+Observed Slice credit notification structure (privacy-sanitized): subject
+`Received ₹X in your slice account`; body `You have received ₹X via UPI in
+your slice bank account … Avl. Bal. ₹Y`. The generic all-amount parser
+sees both X and Y, which would incorrectly reject legitimate credits.
+We now require the **subject credit X** and **body credit X** to agree,
+while ignoring the available balance Y. Debit alerts, missing body credit,
+multiple credit anchors, bad numeric formats, and conflicting credit
+amounts are unusable. **No real email body, sender, account ID, RRN,
+Gmail credential or secret is stored in this code or test fixtures.**
+
+This is still untrusted, spoofable mailbox evidence for a tentative
+staff-review match, not independent bank settlement. No auto-approval.

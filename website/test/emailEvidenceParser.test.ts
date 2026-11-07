@@ -151,3 +151,77 @@ describe("untrusted amount-only bank-mail extraction (manual review only)", () =
     expect(parsed.canFulfill).toBe(false);
   });
 });
+
+describe("Slice credit alert template (synthetic; evidence only)", () => {
+  const slice = (subject: string, body: string): UntrustedPaymentEmail => ({
+    from: "attacker-can-spoof-this@example.test",
+    subject, body,
+    authenticationResults: "dkim=pass; spf=pass; dmarc=pass",
+  });
+  const actualStyleSubject = "Received ₹1,626.24 in your slice account";
+  const actualStyleBody =
+    "You have received ₹1,626.24 via UPI in your slice bank account xx0000. Avl. Bal. ₹25,189.71";
+
+  test("extracts only the received credit, never the account balance", () => {
+    const result = parseUntrustedPaymentEmail(slice(actualStyleSubject, actualStyleBody));
+    expect(result.reportedAmountPaise).toBe(162624);
+    expect(result.warnings).not.toContain("CONFLICTING_AMOUNTS");
+    expect(result.classification).toBe("NEEDS_REVIEW");
+    expect(result.paymentVerified).toBe(false);
+    expect(result.canFulfill).toBe(false);
+    expect(result).not.toHaveProperty("availableBalancePaise");
+  });
+  test("independent subject and body credit amount must be identical", () => {
+    const result = parseUntrustedPaymentEmail(slice(
+      actualStyleSubject, actualStyleBody.replace("received ₹1,626.24", "received ₹1,626.25"),
+    ));
+    expect(result.reportedAmountPaise).toBeNull();
+    expect(result.warnings).toContain("CONFLICTING_AMOUNTS");
+  });
+  test("rejects debit notifications even if they contain an exact pending amount", () => {
+    const r = parseUntrustedPaymentEmail(slice(
+      "₹1,626.24 debited from your slice account",
+      "₹1,626.24 was debited from your slice account.",
+    ));
+    expect(r.reportedAmountPaise).toBeNull();
+    expect(r.warnings).toContain("NON_CREDIT_NOTIFICATION");
+  });
+  test("rejects duplicate transaction anchors rather than picking a favorable one", () => {
+    const r = parseUntrustedPaymentEmail(slice(
+      actualStyleSubject, actualStyleBody + " " + actualStyleBody,
+    ));
+    expect(r.reportedAmountPaise).toBeNull();
+    expect(r.warnings).toContain("CONFLICTING_AMOUNTS");
+  });
+  test("rejects edited or missing credit body, even if subject appears valid", () => {
+    for (const body of [
+      "Avl. Bal. ₹1,626.24", "You have received ₹1,626.24", "", "Your account was debited ₹1,626.24",
+    ]) {
+      const r = parseUntrustedPaymentEmail(slice(actualStyleSubject, body));
+      expect(r.reportedAmountPaise).toBeNull();
+      expect(r.canFulfill).toBe(false);
+    }
+  });
+  test("subject encoded as base64 still follows strict Slice credit template", () => {
+    const encoded = "=?UTF-8?B?" + Buffer.from(actualStyleSubject).toString("base64") + "?=";
+    const r = parseUntrustedPaymentEmail(slice(encoded, actualStyleBody));
+    expect(r.reportedAmountPaise).toBe(162624);
+    expect(r.canFulfill).toBe(false);
+  });
+  test("unusual fractional formats and invalid paise never match", () => {
+    for (const amount of ["₹1,626.234", "₹0", "₹1,2", "₹9999999999999999999999"]) {
+      const r = parseUntrustedPaymentEmail(slice(
+        `Received ${amount} in your slice account`,
+        `You have received ${amount} via UPI in your slice bank account xx0000. Avl. Bal. ₹20,000`,
+      ));
+      expect(r.reportedAmountPaise).toBeNull();
+      expect(r.paymentVerified).toBe(false);
+    }
+  });
+  test("an attacker can forge this template; email never makes payment verified", () => {
+    const r = parseUntrustedPaymentEmail(slice(actualStyleSubject, actualStyleBody));
+    expect(r.warnings).toContain("UNTRUSTED_EMAIL_SOURCE");
+    expect(r.paymentVerified).toBe(false);
+    expect(r.canFulfill).toBe(false);
+  });
+});
