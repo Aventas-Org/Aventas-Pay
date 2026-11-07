@@ -49,6 +49,7 @@ async function createSession(
   env: ReturnType<typeof makeEnv>,
   orderId = "AVT-2026-000123",
   discordId = "123456789012345678",
+  idempotencyKey?: string,
 ) {
   const res = await handleCreateSession(env.createDeps, {
     method: "POST",
@@ -64,6 +65,7 @@ async function createSession(
       currency: "INR",
       payment_profile_id: "primary",
       upi: { vpa: "merchant@upi", display_name: "Aventas Store" },
+      ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
     }),
   });
   return JSON.parse(res.body);
@@ -138,6 +140,37 @@ describe("handleVerifySession", () => {
       provider_transaction_ref: "UTR-OTHER-REF1",
     }));
     expect(mismatch.status).toBe(409);
+  });
+
+  test("custom idempotency key keeps trusted receipt verification replay-safe", async () => {
+    const env = makeEnv();
+    const orderId = "AVT-CUSTOM-KEY-1";
+    const created = await createSession(
+      env, orderId, "123456789012345678", "merchant-defined-session-key-001",
+    );
+    expect(created.session_status).toBe("PENDING");
+
+    const receipt = { order_id: orderId, provider_transaction_ref: "UTR-CUSTOM-001" };
+    const verified = await handleVerifySession(env.deps, verifyRequest(receipt));
+    expect(verified.status).toBe(200);
+    expect(JSON.parse(verified.body).status).toBe("PAID");
+
+    // A repeated trusted notification must acknowledge the same paid order,
+    // not 404 merely because its creation key was not the derived default.
+    const replay = await handleVerifySession(env.deps, verifyRequest(receipt));
+    expect(replay.status).toBe(200);
+    expect(JSON.parse(replay.body).status).toBe("PAID");
+    const mismatched = await handleVerifySession(env.deps, verifyRequest({
+      order_id: orderId, provider_transaction_ref: "UTR-CUSTOM-002",
+    }));
+    expect(mismatched.status).toBe(409);
+    expect(JSON.parse(mismatched.body).error.code).toBe("CONFLICT");
+
+    const publicView = await publicStatus(env, created.checkout_token);
+    expect(publicView.body.status).toBe("PAID");
+    expect(publicView.body.qr_payload).toBe("");
+    expect(publicView.body.upi.vpa).toBe("");
+    expect(env.logger.events.filter((e) => e.event === "verify_recorded")).toHaveLength(1);
   });
 
   test("expired session cannot be verified late (never revived)", async () => {
