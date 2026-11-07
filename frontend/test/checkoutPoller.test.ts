@@ -231,6 +231,61 @@ describe("startPolling", () => {
     expect(calls).toBe(callsBeforeStop);
   });
 
+  test("a stopped checkout discards a late success without publishing or rescheduling", async () => {
+    const scheduler = makeScheduler();
+    const updates: unknown[] = [];
+    let resolveLate!: (value: unknown) => void;
+    const late = new Promise<unknown>((resolve) => { resolveLate = resolve; });
+    const controller = startPolling(
+      () => late, // Simulate a network implementation that ignores abort.
+      {
+        schedule: scheduler.schedule,
+        cancel: scheduler.cancel,
+        onState: (state) => updates.push(state),
+      },
+      instantConfig,
+    );
+
+    controller.stop();
+    const updatesAtStop = updates.length;
+    resolveLate({ status: "PENDING", expires_at: FUTURE });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(controller.state().stopped).toBe(true);
+    expect(controller.state().lastOutcome).toBeNull();
+    expect(controller.state().stopReason).toBeNull();
+    expect(updates).toHaveLength(updatesAtStop);
+    expect(scheduler.pending()).toBe(0);
+  });
+
+  test("a stopped checkout discards a late timeout without counting it as a failure", async () => {
+    const scheduler = makeScheduler();
+    const updates: unknown[] = [];
+    let rejectLate!: (error: Error) => void;
+    const late = new Promise<unknown>((_, reject) => { rejectLate = reject; });
+    const controller = startPolling(
+      () => late,
+      {
+        schedule: scheduler.schedule,
+        cancel: scheduler.cancel,
+        onState: (state) => updates.push(state),
+      },
+      instantConfig,
+    );
+
+    controller.stop();
+    const updatesAtStop = updates.length;
+    const error = new Error("aborted");
+    error.name = "AbortError";
+    rejectLate(error);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(controller.state().lastOutcome).toBeNull();
+    expect(controller.state().consecutiveFailures).toBe(0);
+    expect(updates).toHaveLength(updatesAtStop);
+    expect(scheduler.pending()).toBe(0);
+  });
+
   test("failure streak resets after a success", async () => {
     const scheduler = makeScheduler();
     let calls = 0;
