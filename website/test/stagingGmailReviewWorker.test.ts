@@ -30,7 +30,7 @@ describe("Private Railway staging Gmail read-only review runner", () => {
     try {
       const alwaysBlockExternalNetwork = (async () => {
         throw new Error("unexpected real network access");
-      }) as typeof fetch;
+      }) as unknown as typeof fetch;
       const a = await reviewTick(executor, stage, startedAtMs, startedAtMs + 2000,
         alwaysBlockExternalNetwork);
       expect(a).toEqual({
@@ -63,7 +63,7 @@ describe("Private Railway staging Gmail read-only review runner", () => {
       const fetcher = (async () => {
         calls += 1;
         throw new Error("must not be contacted");
-      }) as typeof fetch;
+      }) as unknown as typeof fetch;
       const result = await reviewTick(executor, { ...stage, GMAIL_REVIEW_MODE: "oauth" },
         startedAtMs, startedAtMs + 10000, fetcher);
       expect(result).toMatchObject({
@@ -95,7 +95,7 @@ describe("Private Railway staging Gmail read-only review runner", () => {
       expect(b.sql).toContain("staging_synthetic_upi");
       expect(b.sql).not.toContain("UPDATE");
       return new Response(JSON.stringify(payload("staging_synthetic_upi")), { status: 200 });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
     const orders = await loadSyntheticStagingOrders(
       "synthetic-read-d1-token", startedAtMs, fetcher);
     expect(orders).toEqual([{
@@ -105,11 +105,11 @@ describe("Private Railway staging Gmail read-only review runner", () => {
     }]);
     for (const bad of ["discord_bot", "upi_live", "staging_random"]) {
       await expect(loadSyntheticStagingOrders("synthetic-read-d1-token", startedAtMs,
-        (async () => new Response(JSON.stringify(payload(bad)))) as typeof fetch))
+        (async () => new Response(JSON.stringify(payload(bad)))) as unknown as typeof fetch))
         .rejects.toThrow("STAGING_SNAPSHOT_UNAVAILABLE");
     }
     await expect(loadSyntheticStagingOrders("synthetic-read-d1-token", startedAtMs,
-      (async () => new Response(JSON.stringify(payload("staging_synthetic_upi", 1.25)))) as typeof fetch))
+      (async () => new Response(JSON.stringify(payload("staging_synthetic_upi", 1.25)))) as unknown as typeof fetch))
       .rejects.toThrow("STAGING_SNAPSHOT_UNAVAILABLE");
   });
 
@@ -145,7 +145,7 @@ describe("Private Railway staging Gmail read-only review runner", () => {
           }] }] }), { status: 200 });
         }
         return google(url, init);
-      }) as typeof fetch;
+      }) as unknown as typeof fetch;
       const result = await reviewTick(executor, full, startedAtMs, startedAtMs + 2000, fake);
       expect(result).toMatchObject({
         mode: "oauth", examined: 1, queued: 1, matched: 1,
