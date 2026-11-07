@@ -228,9 +228,9 @@ def test_legacy_ttl_remains_accepted_but_hard_capped_to_two_minutes():
 def test_valid_numeric_aliases_and_zero_retry_budget():
     cfg = CheckoutConfig.from_env(env(
         AVENTAS_CHECKOUT_CONNECT_TIMEOUT="",
-        CONNECT_TIMEOUT="0.5",
+        CHECKOUT_CONNECT_TIMEOUT="0.5",
         AVENTAS_CHECKOUT_TOTAL_TIMEOUT="",
-        TOTAL_TIMEOUT="2.5",
+        CHECKOUT_TOTAL_TIMEOUT="2.5",
         AVENTAS_CHECKOUT_MAX_RETRIES="0",
     ))
     assert cfg.connect_timeout_seconds == 0.5
