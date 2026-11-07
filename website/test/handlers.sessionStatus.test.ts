@@ -128,6 +128,10 @@ describe("handleSessionStatus", () => {
     expect(res.status).toBe(200);
     const body = JSON.parse(res.body);
     expect(body.status).toBe("EXPIRED");
+    expect(body.qr_payload).toBe("");
+    expect(body.upi).toEqual({ vpa: "", display_name: "" });
+    expect(res.body).not.toContain("merchant@upi");
+    expect(body.expires_at).toBe(new Date(Date.parse("2026-10-20T10:02:00Z")).toISOString());
     // Transition persisted for the audit trail.
     const session = [...store.sessions.values()][0]!;
     expect(session.status).toBe("EXPIRED");
@@ -173,5 +177,37 @@ describe("handleSessionStatus", () => {
     expect(stored).toHaveLength(1);
     expect(stored[0]).not.toBe(token);
     expect(stored[0]).toBe(await hashCheckoutToken(token));
+  });
+});
+
+describe("two-minute expiry and payment instruction secrecy", () => {
+  test("link is payable at T+119999ms, invalid at T+120000ms", async () => {
+    const { createDeps, statusDeps, clock } = makeDeps();
+    const token = await createdToken(createDeps, { ttl_seconds: 1800 });
+    clock.current = new Date(clock.current.getTime() + 119_999);
+    const active = JSON.parse((await handleSessionStatus(statusDeps, statusRequest(), token)).body);
+    expect(active.status).toBe("PENDING");
+    expect(active.qr_payload).toContain("upi://pay");
+    clock.current = new Date(clock.current.getTime() + 1);
+    const expired = JSON.parse((await handleSessionStatus(statusDeps, statusRequest(), token)).body);
+    expect(expired.status).toBe("EXPIRED");
+    expect(expired.qr_payload).toBe("");
+    expect(expired.upi.vpa).toBe("");
+  });
+
+  test("legacy 30-minute session cannot leak the recipient after two minutes", async () => {
+    const { createDeps, statusDeps, clock, store } = makeDeps();
+    const token = await createdToken(createDeps);
+    const session = [...store.sessions.values()][0]!;
+    // Simulate a legacy row issued before this change with a 30-minute TTL.
+    store.sessions.set(session.id, {
+      ...session,
+      expiresAt: new Date(session.createdAt.getTime() + 30 * 60000),
+    });
+    clock.current = new Date(clock.current.getTime() + 120_000);
+    const result = await handleSessionStatus(statusDeps, statusRequest(), token);
+    expect(JSON.parse(result.body).status).toBe("EXPIRED");
+    expect(result.body).not.toContain("merchant@upi");
+    expect(result.body).not.toContain("upi://pay");
   });
 });

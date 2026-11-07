@@ -115,6 +115,8 @@ describe("validateCreateSessionRequest", () => {
     const ok = validateCreateSessionRequest(validBody({ ttl_seconds: 600 }));
     expect(ok.ok).toBe(true);
     if (ok.ok) expect(ok.value.ttlSeconds).toBe(600);
+    const short = validateCreateSessionRequest(validBody({ ttl_seconds: 120 }));
+    expect(short.ok).toBe(true);
   });
 
   test("rejects malformed idempotency key but accepts a valid one", () => {

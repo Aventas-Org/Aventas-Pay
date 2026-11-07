@@ -93,7 +93,7 @@ async function sessionStatusImpl(
   }
 
   return jsonResponse(200, {
-    ...toPublicSessionView(session),
+    ...toPublicSessionView(session, status !== "PENDING"),
     status,
   });
 }

@@ -131,14 +131,14 @@ describe("handleCreateSession — creation", () => {
     expect(res.body).not.toContain("123456789012345678");
   });
 
-  test("expires_at honours the requested ttl", async () => {
+  test("expires at 120 seconds even when a legacy bot requests a longer TTL", async () => {
     const { deps, clock } = makeDeps();
     const res = await handleCreateSession(
       deps,
       makeRequest(validBody({ ttl_seconds: 600 })),
     );
     const body = JSON.parse(res.body);
-    const expected = new Date(clock.current.getTime() + 600 * 1000).toISOString();
+    const expected = new Date(clock.current.getTime() + 120 * 1000).toISOString();
     expect(body.expires_at).toBe(expected);
   });
 
@@ -351,5 +351,35 @@ describe("handleCreateSession — validation and failures", () => {
     const res = last as { status: number; body: string };
     expect(res.status).toBe(429);
     expect(JSON.parse(res.body).error.retryAfterSeconds).toBeGreaterThan(0);
+  });
+});
+ 
+describe("two-minute hard checkout deadline", () => {
+  test("default TTL is exactly 120 seconds", async () => {
+    const { deps, clock } = makeDeps();
+    const response = await handleCreateSession(deps, makeRequest(validBody()));
+    expect(response.status).toBe(201);
+    const info = JSON.parse(response.body);
+    expect(info.expires_at).toBe(new Date(clock.current.getTime() + 120000).toISOString());
+  });
+
+  test("shorter, valid TTL is respected instead of extended", async () => {
+    const { deps, clock } = makeDeps();
+    const response = await handleCreateSession(deps, makeRequest(validBody({ ttl_seconds: 60 })));
+    expect(response.status).toBe(201);
+    expect(JSON.parse(response.body).expires_at)
+      .toBe(new Date(clock.current.getTime() + 60000).toISOString());
+  });
+
+  test("repeat Pay Now does not extend the original session or token", async () => {
+    const { deps, clock } = makeDeps();
+    const first = JSON.parse((await handleCreateSession(
+      deps, makeRequest(validBody({ ttl_seconds: 7200 })),
+    )).body);
+    clock.current = new Date(clock.current.getTime() + 119000);
+    const replay = JSON.parse((await handleCreateSession(deps, makeRequest(validBody()))).body);
+    expect(replay.checkout_token).toBe(first.checkout_token);
+    expect(replay.expires_at).toBe(first.expires_at);
+    expect(Date.parse(replay.expires_at) - clock.current.getTime()).toBe(1000);
   });
 });

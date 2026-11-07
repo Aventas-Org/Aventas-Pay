@@ -3,6 +3,7 @@ import {
   applyTransition,
   canTransition,
   effectiveStatus,
+  effectiveExpiryMs,
   IllegalTransition,
   isActive,
   isExpired,
@@ -54,13 +55,17 @@ describe("state machine", () => {
 
   test("active means PENDING and before expiry", () => {
     expect(isActive(session(), NOW)).toBe(true);
+    expect(isActive(session(), new Date(NOW.getTime() + 119_999))).toBe(true);
+    expect(isActive(session(), new Date(NOW.getTime() + 120_000))).toBe(false);
     expect(isActive(session(), EXPIRES)).toBe(false);
     expect(isActive(session({ status: "PAID" }), NOW)).toBe(false);
   });
 
   test("effective status flips to EXPIRED at and after expiry", () => {
     expect(effectiveStatus(session(), NOW)).toBe("PENDING");
-    expect(effectiveStatus(session(), new Date(EXPIRES.getTime() - 1))).toBe("PENDING");
+    expect(effectiveStatus(session(), new Date(NOW.getTime() + 119_999))).toBe("PENDING");
+    expect(effectiveStatus(session(), new Date(NOW.getTime() + 120_000))).toBe("EXPIRED");
+    expect(effectiveExpiryMs(session())).toBe(NOW.getTime() + 120_000);
     expect(effectiveStatus(session(), EXPIRES)).toBe("EXPIRED");
     expect(effectiveStatus(session(), LATER)).toBe("EXPIRED");
   });

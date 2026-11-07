@@ -26,7 +26,7 @@ import {
   validationError,
 } from "../domain/errors";
 import { deriveCheckoutToken, hashCheckoutToken, constantTimeEqual } from "../domain/tokens";
-import { validateCreateSessionRequest } from "../domain/validation";
+import { MAX_PAYABLE_TTL_SECONDS, validateCreateSessionRequest } from "../domain/validation";
 import { deriveIdempotencyKey, nextAttempt, reusableSession } from "../domain/idempotency";
 import { effectiveStatus } from "../domain/stateMachine";
 import type { RateLimiter } from "../domain/rateLimit";
@@ -176,7 +176,7 @@ async function createSessionImpl(
     providerTransactionRef: null,
     createdAt: now,
     updatedAt: now,
-    expiresAt: new Date(now.getTime() + input.ttlSeconds * 1000),
+    expiresAt: new Date(now.getTime() + Math.min(input.ttlSeconds, MAX_PAYABLE_TTL_SECONDS) * 1000),
     paidAt: null,
   };
 

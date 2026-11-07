@@ -13,6 +13,7 @@
 
 import type { CheckoutSession } from "../domain/types";
 import { buildUpiPayload, formatRupees } from "../domain/upi";
+import { effectiveExpiryMs } from "../domain/stateMachine";
 
 export interface PublicSessionView {
   order_ref: string;
@@ -37,16 +38,25 @@ export function buildCheckoutUrl(websiteBaseUrl: string, checkoutToken: string):
   return `${websiteBaseUrl.replace(/\/+$/, "")}/checkout/${checkoutToken}`;
 }
 
-export function toPublicSessionView(session: CheckoutSession): PublicSessionView {
+/**
+ * The status endpoint must never hand out usable UPI instructions once a
+ * session is terminal. Preserve the response schema for old browser clients.
+ */
+export function toPublicSessionView(
+  session: CheckoutSession,
+  hidePaymentInstructions = false,
+): PublicSessionView {
   return {
     order_ref: session.orderId,
     product: { name: session.productName },
     amount_paise: session.amountPaise,
     amount_display: formatRupees(session.amountPaise),
     currency: session.currency,
-    upi: { vpa: session.upi.vpa, display_name: session.upi.displayName },
-    qr_payload: buildUpiPayload(session),
-    expires_at: session.expiresAt.toISOString(),
+    upi: hidePaymentInstructions
+      ? { vpa: "", display_name: "" }
+      : { vpa: session.upi.vpa, display_name: session.upi.displayName },
+    qr_payload: hidePaymentInstructions ? "" : buildUpiPayload(session),
+    expires_at: new Date(effectiveExpiryMs(session)).toISOString(),
   };
 }
 

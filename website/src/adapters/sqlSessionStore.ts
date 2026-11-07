@@ -21,6 +21,7 @@ import type {
   SessionStore,
 } from "../domain/types";
 import { ConstraintViolation } from "./sqlPort";
+import { MAX_PAYABLE_TTL_SECONDS } from "../domain/validation";
 import type { SqlExecutor, SqlValue } from "./sqlPort";
 
 const INSERT_SESSION_SQL = `
@@ -127,9 +128,10 @@ export class SqlSessionStore implements SessionStore {
     // "Active" is evaluated in SQL: PENDING and strictly before expiry.
     const row = await this.db.get<SessionRow>(
       `SELECT ${SESSION_COLUMNS} FROM checkout_sessions
-       WHERE order_id = ? AND status = 'PENDING' AND expires_at > ?
+       WHERE order_id = ? AND status = 'PENDING'
+         AND expires_at > ? AND created_at > ?
        ORDER BY attempt DESC LIMIT 1`,
-      [orderId, toDb(now)],
+      [orderId, toDb(now), toDb(now) - MAX_PAYABLE_TTL_SECONDS * 1000],
     );
     return row ? fromDb(row) : null;
   }
@@ -167,7 +169,8 @@ export class SqlSessionStore implements SessionStore {
            updated_at = ?,
            paid_at = CASE WHEN ? = 'PAID' THEN ? ELSE paid_at END,
            provider_transaction_ref = CASE WHEN ? = 'PAID' THEN ? ELSE provider_transaction_ref END
-       WHERE id = ? AND status = ?`,
+       WHERE id = ? AND status = ?
+         AND (? != 'PAID' OR (expires_at > ? AND created_at > ?))`,
       [
         to,
         toDb(now),
@@ -177,6 +180,9 @@ export class SqlSessionStore implements SessionStore {
         providerTransactionRef ?? null,
         sessionId,
         from,
+        to,
+        toDb(now),
+        toDb(now) - MAX_PAYABLE_TTL_SECONDS * 1000,
       ],
     );
     // Optimistic guard: the WHERE clause pins the expected current status, so

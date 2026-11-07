@@ -90,7 +90,7 @@ class CheckoutConfig:
     max_retries: int = 2
     backoff_base_seconds: float = 0.5
     backoff_max_seconds: float = 8.0
-    ttl_seconds: int = 1800
+    ttl_seconds: int = 120
 
     def __post_init__(self) -> None:
         if not self.enabled:
@@ -136,5 +136,5 @@ class CheckoutConfig:
             connect_timeout_seconds=float(_lookup(source, "AVENTAS_CHECKOUT_CONNECT_TIMEOUT", "5")),
             total_timeout_seconds=float(_lookup(source, "AVENTAS_CHECKOUT_TOTAL_TIMEOUT", "10")),
             max_retries=int(_lookup(source, "AVENTAS_CHECKOUT_MAX_RETRIES", "2")),
-            ttl_seconds=int(_lookup(source, "AVENTAS_CHECKOUT_TTL_SECONDS", "1800")),
+            ttl_seconds=min(120, int(_lookup(source, "AVENTAS_CHECKOUT_TTL_SECONDS", "120"))),
         )
