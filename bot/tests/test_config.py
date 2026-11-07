@@ -181,3 +181,81 @@ def test_unsafe_checkout_origins_fail_closed_without_echoing_url(field, url):
 def test_api_origin_trailing_slash_is_normalized():
     cfg = CheckoutConfig.from_env(env(AVENTAS_PAYMENT_API_URL="https://avantas.example/"))
     assert cfg.api_url == "https://avantas.example"
+
+
+@pytest.mark.parametrize(
+    ("setting", "unsafe"),
+    [
+        ("AVENTAS_CHECKOUT_CONNECT_TIMEOUT", "secret-dont-log-timeout"),
+        ("AVENTAS_CHECKOUT_TOTAL_TIMEOUT", "nan"),
+        ("AVENTAS_CHECKOUT_CONNECT_TIMEOUT", "inf"),
+        ("AVENTAS_CHECKOUT_TOTAL_TIMEOUT", "0"),
+        ("AVENTAS_CHECKOUT_CONNECT_TIMEOUT", "-10"),
+        ("AVENTAS_CHECKOUT_CONNECT_TIMEOUT", "121"),
+        ("AVENTAS_CHECKOUT_TOTAL_TIMEOUT", "301"),
+        ("AVENTAS_CHECKOUT_MAX_RETRIES", "receipt-reference-1234"),
+        ("AVENTAS_CHECKOUT_MAX_RETRIES", "-1"),
+        ("AVENTAS_CHECKOUT_MAX_RETRIES", "6"),
+        ("AVENTAS_CHECKOUT_MAX_RETRIES", "9" * 400),
+        ("AVENTAS_CHECKOUT_TTL_SECONDS", "secret-dont-log-ttl"),
+        ("AVENTAS_CHECKOUT_TTL_SECONDS", "-1"),
+        ("AVENTAS_CHECKOUT_TTL_SECONDS", "7201"),
+        ("AVENTAS_CHECKOUT_TTL_SECONDS", "9" * 400),
+    ],
+)
+def test_invalid_numeric_checkout_env_fails_closed_without_echoing_value(setting, unsafe):
+    with pytest.raises(CheckoutDisabled) as error:
+        CheckoutConfig.from_env(env(**{setting: unsafe}))
+    assert setting in str(error.value)
+    assert unsafe not in str(error.value)
+
+
+def test_invalid_optional_numeric_settings_do_not_break_disabled_manual_fallback():
+    cfg = CheckoutConfig.from_env({
+        "AVENTAS_CHECKOUT_ENABLED": "false",
+        "AVENTAS_CHECKOUT_MAX_RETRIES": "merchant-secret-do-not-echo",
+        "AVENTAS_CHECKOUT_TOTAL_TIMEOUT": "nan",
+    })
+    assert cfg.enabled is False
+    assert cfg.api_secret == ""
+
+
+def test_legacy_ttl_remains_accepted_but_hard_capped_to_two_minutes():
+    cfg = CheckoutConfig.from_env(env(AVENTAS_CHECKOUT_TTL_SECONDS="1800"))
+    assert cfg.ttl_seconds == 120
+
+
+def test_valid_numeric_aliases_and_zero_retry_budget():
+    cfg = CheckoutConfig.from_env(env(
+        AVENTAS_CHECKOUT_CONNECT_TIMEOUT="",
+        CHECKOUT_CONNECT_TIMEOUT="0.5",
+        AVENTAS_CHECKOUT_TOTAL_TIMEOUT="",
+        CHECKOUT_TOTAL_TIMEOUT="2.5",
+        AVENTAS_CHECKOUT_MAX_RETRIES="0",
+    ))
+    assert cfg.connect_timeout_seconds == 0.5
+    assert cfg.total_timeout_seconds == 2.5
+    assert cfg.max_retries == 0
+
+
+@pytest.mark.parametrize("override", [
+    {"max_retries": -1},
+    {"max_retries": True},
+    {"ttl_seconds": -20},
+    {"ttl_seconds": 121},
+    {"connect_timeout_seconds": float("nan")},
+    {"total_timeout_seconds": float("inf")},
+    {"total_timeout_seconds": 0},
+    {"connect_timeout_seconds": 15, "total_timeout_seconds": 10},
+    {"backoff_base_seconds": 10, "backoff_max_seconds": 1},
+    {"backoff_max_seconds": float("nan")},
+])
+def test_direct_checkout_config_construction_rejects_invalid_numeric_options(override):
+    with pytest.raises(CheckoutDisabled):
+        CheckoutConfig(
+            enabled=True,
+            base_url="https://avantas.example",
+            api_url="https://avantas.example",
+            _api_secret=SECRET,
+            **override,
+        )

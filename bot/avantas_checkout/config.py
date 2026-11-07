@@ -7,6 +7,7 @@ object cannot leak it.
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
@@ -62,6 +63,30 @@ def _lookup(
     return default
 
 
+def _numeric_setting(
+    source: "dict[str, str] | os._Environ[str]",
+    name: str,
+    default: str,
+    minimum: float,
+    maximum: float,
+    *,
+    integer: bool = False,
+) -> float | int:
+    """Parse untrusted environment values without leaking them in exceptions."""
+    try:
+        raw = _lookup(source, name, default)
+        value = int(raw) if integer else float(raw)
+    except (TypeError, ValueError, OverflowError):
+        raise CheckoutDisabled(f"invalid checkout configuration: {name}") from None
+    if (
+        value < minimum
+        or value > maximum
+        or not math.isfinite(value)
+    ):
+        raise CheckoutDisabled(f"invalid checkout configuration: {name}")
+    return value
+
+
 def _checkout_origin(value: str) -> str:
     """HTTPS origin only; plain HTTP is reserved for loopback integration tests."""
     try:
@@ -100,12 +125,36 @@ class CheckoutConfig:
             problems.append("AVENTAS_WEBSITE_BASE_URL")
         if not self.api_url:
             problems.append("AVENTAS_PAYMENT_API_URL")
-        if len(self._api_secret) < 16:
+        if not isinstance(self._api_secret, str) or len(self._api_secret) < 16:
             problems.append("AVENTAS_PAYMENT_API_SECRET (min 16 chars)")
         if problems:
             raise CheckoutDisabled(
                 "checkout enabled but configuration incomplete: " + ", ".join(problems)
             )
+
+        # Apply the same limits to direct constructors and environment-loaded
+        # config, so malformed/negative/NaN options never reach aiohttp/retries.
+        for name, value, low, high in (
+            ("AVENTAS_CHECKOUT_CONNECT_TIMEOUT", self.connect_timeout_seconds, 0.05, 120),
+            ("AVENTAS_CHECKOUT_TOTAL_TIMEOUT", self.total_timeout_seconds, 0.05, 300),
+            ("AVENTAS_CHECKOUT_BACKOFF_BASE_SECONDS", self.backoff_base_seconds, 0.001, 120),
+            ("AVENTAS_CHECKOUT_BACKOFF_MAX_SECONDS", self.backoff_max_seconds, 0.001, 120),
+        ):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not low <= value <= high
+                or not math.isfinite(value)
+            ):
+                raise CheckoutDisabled(f"invalid checkout configuration: {name}")
+        if type(self.max_retries) is not int or not 0 <= self.max_retries <= 5:
+            raise CheckoutDisabled("invalid checkout configuration: AVENTAS_CHECKOUT_MAX_RETRIES")
+        if type(self.ttl_seconds) is not int or not 30 <= self.ttl_seconds <= 120:
+            raise CheckoutDisabled("invalid checkout configuration: AVENTAS_CHECKOUT_TTL_SECONDS")
+        if self.connect_timeout_seconds > self.total_timeout_seconds:
+            raise CheckoutDisabled("invalid checkout configuration: AVENTAS_CHECKOUT_CONNECT_TIMEOUT")
+        if self.backoff_base_seconds > self.backoff_max_seconds:
+            raise CheckoutDisabled("invalid checkout configuration: AVENTAS_CHECKOUT_BACKOFF_BASE_SECONDS")
 
         object.__setattr__(self, "base_url", _checkout_origin(self.base_url))
         object.__setattr__(self, "api_url", _checkout_origin(self.api_url))
@@ -126,15 +175,28 @@ class CheckoutConfig:
             # Environment values are untrusted and can contain copied secrets;
             # never include them in exception text or operator alerts.
             raise CheckoutDisabled("checkout enable flag has unrecognized value")
+        # Checkout disabled means no payment HTTP requests. Ignore optional
+        # settings entirely so bad legacy values cannot break manual fallback.
+        if not enabled:
+            return cls(enabled=False, base_url="", api_url="")
+
         base_url = _lookup(source, "AVENTAS_WEBSITE_BASE_URL").strip().rstrip("/")
         api_url = _lookup(source, "AVENTAS_PAYMENT_API_URL").strip()
         return cls(
-            enabled=enabled,
+            enabled=True,
             base_url=base_url,
             api_url=api_url,
             _api_secret=_lookup(source, "AVENTAS_PAYMENT_API_SECRET"),
-            connect_timeout_seconds=float(_lookup(source, "AVENTAS_CHECKOUT_CONNECT_TIMEOUT", "5")),
-            total_timeout_seconds=float(_lookup(source, "AVENTAS_CHECKOUT_TOTAL_TIMEOUT", "10")),
-            max_retries=int(_lookup(source, "AVENTAS_CHECKOUT_MAX_RETRIES", "2")),
-            ttl_seconds=min(120, int(_lookup(source, "AVENTAS_CHECKOUT_TTL_SECONDS", "120"))),
+            connect_timeout_seconds=_numeric_setting(
+                source, "AVENTAS_CHECKOUT_CONNECT_TIMEOUT", "5", 0.05, 120
+            ),
+            total_timeout_seconds=_numeric_setting(
+                source, "AVENTAS_CHECKOUT_TOTAL_TIMEOUT", "10", 0.05, 300
+            ),
+            max_retries=_numeric_setting(
+                source, "AVENTAS_CHECKOUT_MAX_RETRIES", "2", 0, 5, integer=True
+            ),
+            ttl_seconds=min(120, _numeric_setting(
+                source, "AVENTAS_CHECKOUT_TTL_SECONDS", "120", 30, 7200, integer=True
+            )),
         )
