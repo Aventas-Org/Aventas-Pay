@@ -79,9 +79,9 @@ def _numeric_setting(
     except (TypeError, ValueError, OverflowError):
         raise CheckoutDisabled(f"invalid checkout configuration: {name}") from None
     if (
-        not math.isfinite(value)
-        or value < minimum
+        value < minimum
         or value > maximum
+        or not math.isfinite(value)
     ):
         raise CheckoutDisabled(f"invalid checkout configuration: {name}")
     return value
@@ -143,8 +143,8 @@ class CheckoutConfig:
             if (
                 isinstance(value, bool)
                 or not isinstance(value, (int, float))
-                or not math.isfinite(value)
                 or not low <= value <= high
+                or not math.isfinite(value)
             ):
                 raise CheckoutDisabled(f"invalid checkout configuration: {name}")
         if type(self.max_retries) is not int or not 0 <= self.max_retries <= 5:
