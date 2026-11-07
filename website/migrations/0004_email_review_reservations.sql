@@ -31,7 +31,8 @@ CREATE TABLE IF NOT EXISTS payment_email_review_receipts (
   content_digest     TEXT NOT NULL CHECK (length(content_digest) = 64),
   match_reason       TEXT NOT NULL CHECK (match_reason IN (
     'UNUSABLE_EMAIL_AMOUNT', 'NO_MATCH', 'MULTIPLE_MATCHES',
-    'NON_PENDING_ORDER', 'SINGLE_POSSIBLE_ORDER'
+    'NON_PENDING_ORDER', 'SINGLE_POSSIBLE_ORDER',
+    'TIME_DATA_MISSING', 'OUTSIDE_PAYMENT_WINDOW'
   )),
   candidate_order_id TEXT,
   observed_at_ms     INTEGER NOT NULL CHECK (observed_at_ms > 0),

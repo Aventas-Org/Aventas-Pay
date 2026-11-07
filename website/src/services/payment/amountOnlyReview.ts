@@ -16,6 +16,10 @@ export interface ReviewOrderSnapshot {
   readonly amountPaise: number;
   readonly currency: "INR";
   readonly status: ReviewOrderState;
+  /** Trusted, persisted server time at which this order-specific UPI QR was displayed. */
+  readonly paymentWindowStartMs?: number;
+  /** Trusted, persisted server checkout expiry, never an email-provided value. */
+  readonly paymentWindowEndMs?: number;
 }
 
 export interface AmountOnlyReviewResult {
@@ -27,7 +31,9 @@ export interface AmountOnlyReviewResult {
     | "NO_MATCH"
     | "MULTIPLE_MATCHES"
     | "NON_PENDING_ORDER"
-    | "SINGLE_POSSIBLE_ORDER";
+    | "SINGLE_POSSIBLE_ORDER"
+    | "TIME_DATA_MISSING"
+    | "OUTSIDE_PAYMENT_WINDOW";
   readonly candidateOrderId: string | null;
 }
 
@@ -93,4 +99,45 @@ export function correlateUntrustedEmailAmount(
     ...fail("SINGLE_POSSIBLE_ORDER"),
     candidateOrderId: matches[0]!.orderId,
   };
+}
+
+/**
+ * Adds a strict email-arrival-time window to the existing exact-amount
+ * review candidate. Date and time are *additional filters*, NEVER payment
+ * authorization. Every same-amount order in the reconciliation horizon
+ * still counts for ambiguity, even if its own time range differs.
+ *
+ * Only pass Gmail message.internalDate (provider mailbox receipt time);
+ * ignore the editable Date header or timestamps printed in message bodies.
+ * The order window MUST originate from the trusted checkout/order store.
+ */
+export function correlateUntrustedEmailAmountWithReceivedTime(
+  evidence: UntrustedPaymentEvidence,
+  gmailReceivedAtMs: number | null | undefined,
+  ordersInReconciliationWindow: readonly ReviewOrderSnapshot[],
+): AmountOnlyReviewResult {
+  const base = correlateUntrustedEmailAmount(evidence, ordersInReconciliationWindow);
+  if (base.match !== "SINGLE_POSSIBLE_ORDER") return base;
+
+  const reject = (match: AmountOnlyReviewResult["match"]): AmountOnlyReviewResult => ({
+    classification: "NEEDS_REVIEW", paymentVerified: false, canFulfill: false,
+    match, candidateOrderId: null,
+  });
+  const order = ordersInReconciliationWindow.find((o) => o.orderId === base.candidateOrderId);
+  const start = order?.paymentWindowStartMs;
+  const end = order?.paymentWindowEndMs;
+  const GRACE_MS = 2 * 60 * 1000; // Mail delivery delay only, not a payment extension.
+  const MAX_WINDOW_MS = 24 * 60 * 60 * 1000;
+  if (typeof gmailReceivedAtMs !== "number" ||
+      !Number.isSafeInteger(gmailReceivedAtMs) || gmailReceivedAtMs <= 0 ||
+      typeof start !== "number" || !Number.isSafeInteger(start) || start <= 0 ||
+      typeof end !== "number" || !Number.isSafeInteger(end) || end <= 0 ||
+      end < start || end - start > MAX_WINDOW_MS ||
+      end > Number.MAX_SAFE_INTEGER - GRACE_MS) {
+    return reject("TIME_DATA_MISSING");
+  }
+  if (gmailReceivedAtMs < start || gmailReceivedAtMs > end + GRACE_MS) {
+    return reject("OUTSIDE_PAYMENT_WINDOW");
+  }
+  return base;
 }

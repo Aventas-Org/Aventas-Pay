@@ -112,6 +112,7 @@ export async function queueEmailEvidenceForReview(
   envelope: InboxEvidenceEnvelope,
   ordersInReconciliationWindow: readonly ReviewOrderSnapshot[],
   observedAtMs: number,
+  requireGmailReceivedTime = false,
 ): Promise<ReviewQueueOutcome> {
   const invalid = !Number.isSafeInteger(observedAtMs) || observedAtMs <= 0;
   if (invalid) {
@@ -121,7 +122,9 @@ export async function queueEmailEvidenceForReview(
     );
     return { kind: "REJECTED", intake };
   }
-  const initial = stageInboxEmailForReview(envelope, [], ordersInReconciliationWindow);
+  const initial = stageInboxEmailForReview(
+    envelope, [], ordersInReconciliationWindow, requireGmailReceivedTime,
+  );
   if (initial.state !== "NEW_REVIEW_EVIDENCE" || !initial.receipt || !initial.match) {
     return { kind: "REJECTED", intake: initial };
   }
@@ -137,7 +140,9 @@ export async function queueEmailEvidenceForReview(
   });
   const prior = await readPrior();
   if (prior) {
-    const intake = stageInboxEmailForReview(envelope, [asPrior(prior)], ordersInReconciliationWindow);
+    const intake = stageInboxEmailForReview(
+      envelope, [asPrior(prior)], ordersInReconciliationWindow, requireGmailReceivedTime,
+    );
     return {
       kind: intake.state === "DUPLICATE_MESSAGE" ? "DUPLICATE" : "CONTENT_CONFLICT",
       intake,
@@ -154,7 +159,9 @@ export async function queueEmailEvidenceForReview(
   if (!raced) {
     throw new Error("REVIEW_RECEIPT_WRITE_CONFLICT");
   }
-  const intake = stageInboxEmailForReview(envelope, [asPrior(raced)], ordersInReconciliationWindow);
+  const intake = stageInboxEmailForReview(
+    envelope, [asPrior(raced)], ordersInReconciliationWindow, requireGmailReceivedTime,
+  );
   return {
     kind: intake.state === "DUPLICATE_MESSAGE" ? "DUPLICATE" : "CONTENT_CONFLICT",
     intake,
