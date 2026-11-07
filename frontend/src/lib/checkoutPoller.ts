@@ -148,11 +148,14 @@ export function startPolling(
 
   const tick = async () => {
     if (state.stopped) return;
-    inflight = new AbortController();
-    const timeoutId = setTimeout(() => inflight?.abort(), config.requestTimeoutMs);
+    // Capture this request's controller so an old timeout cannot abort a
+    // later request after the current one has already settled.
+    const controller = new AbortController();
+    inflight = controller;
+    const timeoutId = setTimeout(() => controller.abort(), config.requestTimeoutMs);
     let outcome: PollOutcome;
     try {
-      const payload = await fetchSnapshot(inflight.signal);
+      const payload = await fetchSnapshot(controller.signal);
       const snapshot = parseSnapshot(payload);
       outcome = snapshot
         ? { kind: "ok", snapshot }
@@ -162,8 +165,13 @@ export function startPolling(
       outcome = { kind: "error", reason: aborted ? "timeout" : "network" };
     } finally {
       clearTimeout(timeoutId);
-      inflight = null;
+      if (inflight === controller) inflight = null;
     }
+
+    // stop() is allowed to run while an HTTP request is unresolved. A fetch
+    // implementation may settle despite abort; its result is never allowed to
+    // revive payment instructions, emit a late state, or schedule another poll.
+    if (state.stopped) return;
 
     state.lastOutcome = outcome;
     attempt += 1;
