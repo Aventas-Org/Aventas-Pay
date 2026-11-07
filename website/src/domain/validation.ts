@@ -10,9 +10,12 @@
 
 export const MIN_AMOUNT_PAISE = 100; // 1 INR
 export const MAX_AMOUNT_PAISE = 1_000_000_000; // 1 crore INR
-export const MIN_TTL_SECONDS = 300;
+/** A checkout URL must not remain payable for more than two minutes. */
+export const MAX_PAYABLE_TTL_SECONDS = 120;
+/** Accept old bot TTL values for backward compatibility; clamp on creation. */
+export const MIN_TTL_SECONDS = 30;
 export const MAX_TTL_SECONDS = 7200;
-export const DEFAULT_TTL_SECONDS = 1800;
+export const DEFAULT_TTL_SECONDS = MAX_PAYABLE_TTL_SECONDS;
 
 export interface CreateSessionRequest {
   orderId: string;

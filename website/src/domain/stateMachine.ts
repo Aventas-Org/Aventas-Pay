@@ -7,6 +7,7 @@
  */
 
 import { TERMINAL_STATUSES } from "./types";
+import { MAX_PAYABLE_TTL_SECONDS } from "./validation";
 import type { CheckoutSession, Clock, SessionStatus } from "./types";
 
 export class IllegalTransition extends Error {
@@ -27,9 +28,20 @@ export function canTransition(from: SessionStatus, to: SessionStatus): boolean {
   return ALLOWED[from].includes(to);
 }
 
-/** True while the session still awaits payment (PENDING and not yet expired). */
+/**
+ * Server-side hard deadline for both new and legacy sessions. Old 30-minute
+ * rows are capped without a destructive production migration.
+ */
+export function effectiveExpiryMs(session: CheckoutSession): number {
+  return Math.min(
+    session.expiresAt.getTime(),
+    session.createdAt.getTime() + MAX_PAYABLE_TTL_SECONDS * 1000,
+  );
+}
+
+/** True only while a pending session is before its hard deadline. */
 export function isActive(session: CheckoutSession, now: Date): boolean {
-  return session.status === "PENDING" && now.getTime() < session.expiresAt.getTime();
+  return session.status === "PENDING" && now.getTime() < effectiveExpiryMs(session);
 }
 
 /**
@@ -38,7 +50,7 @@ export function isActive(session: CheckoutSession, now: Date): boolean {
  * change it back. Callers persist the transition (best effort) for the audit trail.
  */
 export function effectiveStatus(session: CheckoutSession, now: Date): SessionStatus {
-  if (session.status === "PENDING" && now.getTime() >= session.expiresAt.getTime()) {
+  if (session.status === "PENDING" && now.getTime() >= effectiveExpiryMs(session)) {
     return "EXPIRED";
   }
   return session.status;
