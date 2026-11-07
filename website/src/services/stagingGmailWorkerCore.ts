@@ -28,7 +28,7 @@ const EXPECTED_SOURCE = "staging_synthetic_upi";
 
 type Fetcher = typeof fetch;
 type Env = Readonly<Record<string, string | undefined>>;
-export type WorkerMode = "disabled" | "synthetic" | "oauth";
+export type WorkerMode = "disabled" | "synthetic" | "snapshot_probe" | "oauth";
 
 function eligible(env: Env): boolean {
   return env.APP_ENV === "staging" && env.RAILWAY_ENVIRONMENT_NAME === "staging";
@@ -37,6 +37,13 @@ function eligible(env: Env): boolean {
 export function chooseMode(env: Env): WorkerMode {
   if (!eligible(env)) return "disabled";
   if (env.GMAIL_REVIEW_MODE === "synthetic") return "synthetic";
+  // Short-lived operator QA mode. Fetches ONLY synthetic staging order
+  // metadata; it cannot contact Google, read Gmail or verify payments.
+  if (env.GMAIL_REVIEW_MODE === "snapshot_probe" &&
+      env.RAILWAY_VOLUME_MOUNT_PATH === "/data" &&
+      typeof env.STAGING_GMAIL_SNAPSHOT_TOKEN === "string" &&
+      env.STAGING_GMAIL_SNAPSHOT_TOKEN.length >= 43 &&
+      env.STAGING_GMAIL_SNAPSHOT_TOKEN.length <= 256) return "snapshot_probe";
   if (env.GMAIL_REVIEW_MODE === "oauth" &&
       env.GMAIL_REVIEW_ENABLED === "true" &&
       env.RAILWAY_VOLUME_MOUNT_PATH === "/data" &&
@@ -216,6 +223,12 @@ export async function reviewTick(
   }
   const token = env.STAGING_GMAIL_SNAPSHOT_TOKEN!;
   const orders = await loadSyntheticStagingOrders(token, nowMs, fetcher);
+  if (mode === "snapshot_probe") {
+    return {
+      mode, examined: orders.length, queued: 0, matched: 0,
+      paymentVerified: false, canFulfill: false,
+    };
+  }
   // No authoritative order snapshot = do not access mailbox.
   if (orders.length === 0) return {
     mode, examined: 0, queued: 0, matched: 0,
