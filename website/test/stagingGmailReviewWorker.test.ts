@@ -112,6 +112,34 @@ describe("Private Railway staging Gmail read-only review runner", () => {
       .rejects.toThrow("STAGING_SNAPSHOT_UNAVAILABLE");
   });
 
+  test("snapshot probe proves live bearer feed without Google calls, payment writes or emails",async()=>{
+    const dir = mkdtempSync(join(tmpdir(), "aventas-review-probe-"));
+    const {database, executor}=openReviewDb(join(dir,"qa.sqlite3"));
+    const settings={...stage,GMAIL_REVIEW_MODE:"snapshot_probe",
+      RAILWAY_VOLUME_MOUNT_PATH:"/data",
+      STAGING_GMAIL_SNAPSHOT_TOKEN:"synthetic-staging-snapshot-token-strong-01234567890",
+    };
+    expect(chooseMode(settings)).toBe("snapshot_probe");
+    expect(chooseMode({...settings,APP_ENV:"production"})).toBe("disabled");
+    expect(chooseMode({...settings,STAGING_GMAIL_SNAPSHOT_TOKEN:"short"})).toBe("disabled");
+    let calls=0;
+    const fetcher=(async(url:RequestInfo|URL,init?:RequestInit)=>{
+      calls++;
+      expect(String(url)).toBe("https://pay-staging.aventasgaming.com/api/internal/staging-gmail-snapshot");
+      expect(init?.method).toBe("POST");
+      expect(init?.body).toBeUndefined();
+      return new Response(JSON.stringify({success:true,result:[{results:[]}]}),{status:200});
+    }) as unknown as typeof fetch;
+    try {
+      const result=await reviewTick(executor,settings,startedAtMs,startedAtMs+2000,fetcher);
+      expect(result).toEqual({mode:"snapshot_probe",examined:0,queued:0,matched:0,
+        paymentVerified:false,canFulfill:false});
+      expect(calls).toBe(1); // no calls to Google's token or Gmail APIs
+      expect(database.prepare("SELECT count(*) AS n FROM payment_email_review_receipts").get())
+        .toEqual({n:0});
+    }finally{database.close();rmSync(dir,{recursive:true,force:true});}
+  });
+
   test("OAuth mode requires every secret, the 10-second worker remains review-only", async () => {
     const full = {
       ...stage, GMAIL_REVIEW_MODE: "oauth",

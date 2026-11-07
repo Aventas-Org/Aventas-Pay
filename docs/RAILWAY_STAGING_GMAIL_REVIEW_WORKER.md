@@ -90,3 +90,7 @@ The worker uses a fixed `POST https://pay-staging.aventasgaming.com/api/internal
 - Railway `aventas-gmail-review-staging`: `STAGING_GMAIL_SNAPSHOT_TOKEN` (private variable)
 
 The endpoint is unavailable in production and exposes only non-PAID synthetic test order records. Never reuse payment credentials or publish this bearer value in git, logs, screenshots or chat.
+
+## One-time authenticated connection probe
+
+Before enabling Gmail OAuth, set `GMAIL_REVIEW_MODE=snapshot_probe` while the private snapshot token is present. This makes the worker query ONLY the bounded, non-PAID staging synthetic order snapshot feed every 10 seconds. It does not call Google, insert email receipts or verify any payment. Check the Railway deploy log for `staging_gmail_review_tick`, `mode=snapshot_probe` and no `staging_gmail_review_tick_unavailable`. Restore `GMAIL_REVIEW_MODE=synthetic` immediately after confirming the connection. Never leave the probe enabled as a production mode.
