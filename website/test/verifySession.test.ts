@@ -6,6 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import { handleVerifySession } from "../src/handlers/verifySession";
 import { handleCreateSession } from "../src/handlers/createSession";
+import { handleCancelSession } from "../src/handlers/cancelSession";
 import { handleSessionStatus } from "../src/handlers/sessionStatus";
 import { InMemoryRateLimiter } from "../src/domain/rateLimit";
 import { capturingLogger } from "../src/domain/log";
@@ -110,6 +111,8 @@ describe("handleVerifySession", () => {
     }));
     expect(res.status).toBe(200);
     expect(JSON.parse(res.body).status).toBe("PAID");
+    expect(JSON.parse(res.body).qr_payload).toBe("");
+    expect(JSON.parse(res.body).upi.vpa).toBe("");
 
     const pub = await publicStatus(env, created.checkout_token);
     expect(pub.status).toBe(200);
@@ -134,6 +137,8 @@ describe("handleVerifySession", () => {
     }));
     expect(replay.status).toBe(200);
     expect(JSON.parse(replay.body).status).toBe("PAID");
+    expect(JSON.parse(replay.body).qr_payload).toBe("");
+    expect(JSON.parse(replay.body).upi.vpa).toBe("");
 
     const mismatch = await handleVerifySession(env.deps, verifyRequest({
       order_id: "AVT-2026-000123",
@@ -171,6 +176,56 @@ describe("handleVerifySession", () => {
     expect(publicView.body.qr_payload).toBe("");
     expect(publicView.body.upi.vpa).toBe("");
     expect(env.logger.events.filter((e) => e.event === "verify_recorded")).toHaveLength(1);
+  });
+
+  test("custom-key cancelled session rejects trusted verification after terminal replay", async () => {
+    const env = makeEnv();
+    const orderId = "AVT-CUSTOM-CANCEL-SQL";
+    await createSession(env, orderId, "123456789012345678", "custom-cancel-sql-key-001");
+    const req: HandlerRequest = {
+      method: "POST",
+      path: "/api/payments/checkout-sessions/cancel",
+      authorization: `Bearer ${BOT_SECRET}`,
+      clientIp: "203.0.113.24",
+      bodyText: JSON.stringify({ order_id: orderId }),
+    };
+    const first = await handleCancelSession(env.createDeps, req);
+    const replay = await handleCancelSession(env.createDeps, req);
+    for (const response of [first, replay]) {
+      expect(response.status).toBe(200);
+      expect(JSON.parse(response.body).status).toBe("CANCELLED");
+      expect(JSON.parse(response.body).qr_payload).toBe("");
+    }
+    const verify = await handleVerifySession(env.deps, verifyRequest({
+      order_id: orderId, provider_transaction_ref: "UTR-CANCEL-SQL",
+    }));
+    expect(verify.status).toBe(409);
+  });
+
+  test("expired custom-key session returns verification conflict, not unknown order", async () => {
+    const env = makeEnv();
+    const orderId = "AVT-CUSTOM-EXPIRED-SQL";
+    await createSession(env, orderId, "123456789012345678", "custom-expired-sql-001");
+    env.clock.current = new Date(env.clock.current.getTime() + 121000);
+    const verify = await handleVerifySession(env.deps, verifyRequest({
+      order_id: orderId, provider_transaction_ref: "UTR-EXPIRED-SQL",
+    }));
+    expect(verify.status).toBe(409);
+    expect(JSON.parse(verify.body).error.code).toBe("CONFLICT");
+  });
+
+  test("latest-order query breaks same-millisecond attempt ties by insertion order", async () => {
+    const env = makeEnv();
+    const orderId = "AVT-SAME-TIME-ATTEMPTS";
+    await createSession(env, orderId, "123456789012345678", "custom-same-ms-key-001");
+    const first = await env.store.findLatestByOrderId(orderId);
+    expect(first).not.toBeNull();
+    await env.store.updateStatus(first!.id, "PENDING", "CANCELLED", env.clock.now());
+    await createSession(env, orderId, "123456789012345678", "custom-same-ms-key-002");
+    const second = await env.store.findLatestByOrderId(orderId);
+    expect(second).not.toBeNull();
+    expect(second!.id).not.toBe(first!.id);
+    expect(second!.status).toBe("PENDING");
   });
 
   test("expired session cannot be verified late (never revived)", async () => {
