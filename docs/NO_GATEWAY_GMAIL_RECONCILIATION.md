@@ -78,3 +78,35 @@ accessed by these tests.
 
 Read [original evidence safeguards](EMAIL_REVIEW_INTAKE.md) and
 [release gates](WORK_REMAINING_BLOCKED.md).
+
+## Added date and time cross-check
+
+The Gmail-based sync now uses Gmail's `message.internalDate` (Unix epoch
+milliseconds) as the **mailbox reception time**. For normal SMTP mail this
+usually means when Google accepted it; it is more useful than the sender-
+editable `Date` header, but it is NOT a timestamp of a bank credit. Gmail
+API-imported mail can have a caller-supplied internalDate.
+
+The order snapshot MUST provide both of these **trusted server-persisted**
+UTC epoch-millisecond fields:
+- `paymentWindowStartMs`: when the order-specific QR/Pay Now screen actually
+  became payable (not the customer's browser clock or the email's Date field).
+- `paymentWindowEndMs`: when that payment window expires.
+
+To produce even a tentative `SINGLE_POSSIBLE_ORDER` Gmail candidate, exact
+integer paise, INR currency, unique matching order, `PENDING` state and
+Gmail reception time within [window start, window end + 120 seconds] must
+all hold. Late notifications during the two-minute grace period are review
+candidates only; they do NOT extend the customer's valid payment session.
+Missing timestamps, reversed/oversized windows and emails arriving before
+the QR or after the grace period remain `NEEDS_REVIEW` with no candidate.
+Multiple orders claiming the same amount remain ambiguous irrespective of
+their date windows; the unique-reservation ledger must not recycle paise.
+
+All comparisons use UTC epoch milliseconds to handle IST dates and midnight
+rollovers without ambiguous local strings. Do not parse an email's `Date`
+header, mail body text, or buyer-supplied checkout time as authority.
+The user-facing 10-second poll interval is a scheduler choice, not a
+payment verification method, and is not enabled by this patch.
+
+This stage still NEVER transitions orders to PAID or delivers products.

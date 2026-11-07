@@ -36,6 +36,8 @@ type Fetcher = typeof fetch;
 
 interface GmailMessage {
   readonly id?: unknown;
+  /** Gmail API internalDate, a string containing Unix epoch milliseconds. */
+  readonly internalDate?: unknown;
   readonly payload?: unknown;
 }
 
@@ -133,10 +135,19 @@ function readEnvelope(
   const body = findTextPart(message.payload, "text/plain") ??
     findTextPart(message.payload, "text/html");
   if (!body) return null;
+  // The RFC-5322 Date header and any body timestamp are untrusted.
+  // For normal SMTP mail Gmail internalDate reflects Google acceptance time.
+  // Imported mail may have a caller-selected internalDate: still only a hint.
+  const rawReceived = message.internalDate;
+  const received = typeof rawReceived === "string" &&
+    /^\d{13}$/.test(rawReceived) ? Number(rawReceived) : null;
+  const gmailReceivedAtMs = received !== null &&
+    Number.isSafeInteger(received) && received > 0 ? received : undefined;
   return {
     mailboxConnectionId,
     mailboxMessageId: message.id,
     email: { from, subject, body },
+    ...(gmailReceivedAtMs === undefined ? {} : { gmailReceivedAtMs }),
   };
 }
 
@@ -208,6 +219,7 @@ export async function syncGmailEvidenceToReviewQueue(
   for (const envelope of emails) {
     const outcome = await queueEmailEvidenceForReview(
       db, envelope, ordersInReconciliationWindow, config.nowMs,
+      true, // Strict Gmail time check: no silent amount-only fallback.
     );
     if (outcome.kind === "INSERTED") {
       newlyStaged += 1;

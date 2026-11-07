@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { parseUntrustedPaymentEmail } from "../src/services/payment/emailEvidenceParser";
 import {
   correlateUntrustedEmailAmount,
+  correlateUntrustedEmailAmountWithReceivedTime,
   suggestUnusedFractionalAmountPaise,
   type ReviewOrderSnapshot,
 } from "../src/services/payment/amountOnlyReview";
@@ -80,5 +81,73 @@ describe("email-amount suggestions never authorize payment", () => {
     const result = correlateUntrustedEmailAmount(evidence, [order("a", 48024)]);
     expect(result.paymentVerified).toBe(false);
     expect(result.canFulfill).toBe(false);
+  });
+});
+
+describe("amount + Gmail internalDate + trusted order payment window", () => {
+  const start = Date.parse("2026-11-07T08:45:00.000Z");
+  const end = Date.parse("2026-11-07T09:00:00.000Z");
+  const timed = (status: ReviewOrderSnapshot["status"] = "PENDING"): ReviewOrderSnapshot => ({
+    ...order("AVT-100", 48024, status),
+    paymentWindowStartMs: start,
+    paymentWindowEndMs: end,
+  });
+  const match = (received: number | undefined, orders = [timed()]) =>
+    correlateUntrustedEmailAmountWithReceivedTime(alert("Received ₹480.24"), received, orders);
+
+  test("Gmail arrived nine seconds after Pay Now: one tentative match only", () => {
+    const r = match(start + 9000);
+    expect(r.match).toBe("SINGLE_POSSIBLE_ORDER");
+    expect(r.candidateOrderId).toBe("AVT-100");
+    expect(r.paymentVerified).toBe(false);
+    expect(r.canFulfill).toBe(false);
+  });
+  test("old credit notification from before QR display cannot match", () => {
+    const r = match(start - 1000);
+    expect(r.match).toBe("OUTSIDE_PAYMENT_WINDOW");
+    expect(r.candidateOrderId).toBeNull();
+  });
+  test("short delayed email up to two minutes after expiry is a review hint", () => {
+    expect(match(end + 120_000).match).toBe("SINGLE_POSSIBLE_ORDER");
+    expect(match(end + 120_001).match).toBe("OUTSIDE_PAYMENT_WINDOW");
+  });
+  test("a different date is rejected, including previous-day payment", () => {
+    expect(match(start - 24 * 60 * 60 * 1000).match).toBe("OUTSIDE_PAYMENT_WINDOW");
+  });
+  test("crossing midnight IST works with UTC epoch timestamps, not naive time strings", () => {
+    const midnightStart = Date.parse("2026-11-07T18:28:00.000Z"); // 23:58 IST
+    const midnightEnd = Date.parse("2026-11-07T18:40:00.000Z"); // 00:10 IST on Nov 8
+    const late = Date.parse("2026-11-07T18:33:15.000Z"); // 00:03:15 IST on Nov 8
+    const r = match(late, [{ ...timed(), paymentWindowStartMs: midnightStart, paymentWindowEndMs: midnightEnd }]);
+    expect(r.match).toBe("SINGLE_POSSIBLE_ORDER");
+  });
+  test.each([undefined, NaN, 0, -1, 1.5])("missing/invalid Gmail receive time %s fails closed", (received) => {
+    expect(match(received).match).toBe("TIME_DATA_MISSING");
+    expect(match(received).candidateOrderId).toBeNull();
+  });
+  test("missing or invalid trusted server order times cannot silently fall back", () => {
+    for (const changed of [
+      { paymentWindowStartMs: undefined },
+      { paymentWindowEndMs: undefined },
+      { paymentWindowEndMs: start - 1 },
+      { paymentWindowEndMs: start + 25 * 60 * 60 * 1000 },
+    ]) {
+      expect(match(start + 1000, [{ ...timed(), ...changed }]).match).toBe("TIME_DATA_MISSING");
+    }
+  });
+  test("matching amount on multiple orders stays ambiguous despite nonoverlapping times", () => {
+    const old = { ...timed(), orderId: "AVT-old",
+      paymentWindowStartMs: start - 24 * 60 * 60 * 1000,
+      paymentWindowEndMs: start - 23 * 60 * 60 * 1000 };
+    const r = match(start + 1000, [timed(), old]);
+    expect(r.match).toBe("MULTIPLE_MATCHES");
+    expect(r.candidateOrderId).toBeNull();
+  });
+  test("a terminal order never becomes a candidate via matching time", () => {
+    expect(match(start + 1000, [timed("PAID")]).match).toBe("NON_PENDING_ORDER");
+  });
+  test("wrong amount is never rescued by an exact matching date/time", () => {
+    const r = match(start + 1000, [{ ...timed(), amountPaise: 48025 }]);
+    expect(r.match).toBe("NO_MATCH");
   });
 });

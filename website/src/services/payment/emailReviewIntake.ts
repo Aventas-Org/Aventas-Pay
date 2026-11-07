@@ -14,6 +14,7 @@ import {
 } from "./emailEvidenceParser";
 import {
   correlateUntrustedEmailAmount,
+  correlateUntrustedEmailAmountWithReceivedTime,
   type AmountOnlyReviewResult,
   type ReviewOrderSnapshot,
 } from "./amountOnlyReview";
@@ -24,6 +25,8 @@ export interface InboxEvidenceEnvelope {
   /** Provider-assigned mailbox API message ID; NOT the email Message-ID header. */
   readonly mailboxMessageId: string;
   readonly email: UntrustedPaymentEmail;
+  /** Gmail message.internalDate in UTC epoch ms, never the untrusted Date header. */
+  readonly gmailReceivedAtMs?: number;
 }
 
 /** Restricted storage representation: no raw message, header or UTR. */
@@ -95,6 +98,7 @@ export function stageInboxEmailForReview(
   envelope: InboxEvidenceEnvelope,
   priorReceipts: readonly EmailReviewReceipt[],
   ordersInReconciliationWindow: readonly ReviewOrderSnapshot[],
+  requireGmailReceivedTime = false,
 ): InboxIntakeResult {
   if (!envelope || !safeConnectionId(envelope.mailboxConnectionId) ||
       !safeProviderMessageId(envelope.mailboxMessageId) ||
@@ -116,6 +120,7 @@ export function stageInboxEmailForReview(
   const contentDigest = hash(JSON.stringify([
     envelope.email.from, envelope.email.subject, envelope.email.body,
     envelope.email.authenticationResults ?? null,
+    envelope.gmailReceivedAtMs ?? null,
   ]));
   const receipt: EmailReviewReceipt = { messageKeyDigest, contentDigest };
 
@@ -128,6 +133,10 @@ export function stageInboxEmailForReview(
     return result("DUPLICATE_MESSAGE");
   }
 
-  const match = correlateUntrustedEmailAmount(evidence, ordersInReconciliationWindow);
+  const match = requireGmailReceivedTime
+    ? correlateUntrustedEmailAmountWithReceivedTime(
+      evidence, envelope.gmailReceivedAtMs, ordersInReconciliationWindow,
+    )
+    : correlateUntrustedEmailAmount(evidence, ordersInReconciliationWindow);
   return result("NEW_REVIEW_EVIDENCE", match.match, match.candidateOrderId, receipt);
 }

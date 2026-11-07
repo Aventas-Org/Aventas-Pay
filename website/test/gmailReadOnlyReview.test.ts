@@ -22,6 +22,7 @@ const messageId = "19bcaa122333";
 const encode = (s: string) => Buffer.from(s, "utf8").toString("base64url");
 const message = {
   id: messageId,
+  internalDate: String(Date.parse("2026-11-07T06:29:42.000Z")),
   payload: {
     mimeType: "multipart/alternative",
     headers: [
@@ -36,6 +37,8 @@ const message = {
 };
 const order: ReviewOrderSnapshot = {
   orderId: "AVT-1001", amountPaise: 48024, currency: "INR", status: "PENDING",
+  paymentWindowStartMs: Date.parse("2026-11-07T06:25:00.000Z"),
+  paymentWindowEndMs: Date.parse("2026-11-07T06:30:00.000Z"),
 };
 type FakeState = {
   listing?: Record<string, unknown>;
@@ -73,6 +76,7 @@ describe("Gmail OAuth read-only evidence", () => {
     const list = await fetchGmailReviewEvidence(config, adapter);
     expect(list).toHaveLength(1);
     expect(list[0]?.mailboxMessageId).toBe(messageId);
+    expect(list[0]?.gmailReceivedAtMs).toBe(Date.parse("2026-11-07T06:29:42.000Z"));
     expect(list[0]?.email.subject).toBe("Received ₹480.24");
     expect(list[0]?.email.body).toContain("INR 480.24");
     expect(list[0]?.email.body).not.toContain("<b>");
@@ -182,5 +186,73 @@ describe("Gmail OAuth read-only evidence", () => {
     } });
     expect(await fetchGmailReviewEvidence(config, adapter)).toHaveLength(1);
     expect(calls).toHaveLength(2);
+  });
+});
+
+describe("Gmail internalDate strict timestamp reconciliation", () => {
+  test("missing Gmail internalDate gets a review receipt, but no order candidate", async () => {
+    const { db, store } = setupStore();
+    const { adapter } = api({ full: { ...message, internalDate: undefined } });
+    const sync = await syncGmailEvidenceToReviewQueue(store, config, [order], adapter);
+    expect(sync.newlyStaged).toBe(1);
+    expect(sync.possibleOrderMatches).toBe(0);
+    expect(sync.paymentVerified).toBe(false);
+    expect(db.query("SELECT match_reason FROM payment_email_review_receipts").get())
+      .toEqual({ match_reason: "TIME_DATA_MISSING" });
+    db.close();
+  });
+
+  test("malformed or numeric internalDate never falls back to editable Date header", async () => {
+    for (const internalDate of ["saturday", "000", 1794032982000, "999999999999999"]) {
+      const { db, store } = setupStore();
+      const { adapter } = api({ full: { ...message, internalDate, payload: {
+        ...message.payload,
+        headers: [...message.payload.headers, { name: "Date", value: "Sat, 7 Nov 2026 06:29:42 +0000" }],
+      } } });
+      const sync = await syncGmailEvidenceToReviewQueue(store, config, [order], adapter);
+      expect(sync.possibleOrderMatches).toBe(0);
+      expect(db.query("SELECT match_reason FROM payment_email_review_receipts").get())
+        .toEqual({ match_reason: "TIME_DATA_MISSING" });
+      db.close();
+    }
+  });
+
+  test("old Gmail received timestamp is rejected although amount and claimed email date match", async () => {
+    const { db, store } = setupStore();
+    const { adapter } = api({ full: { ...message,
+      internalDate: String(Date.parse("2026-11-06T06:29:42Z")),
+      payload: { ...message.payload, headers: [...message.payload.headers,
+        { name: "Date", value: "Sat, 7 Nov 2026 06:29:42 +0000" }] },
+    } });
+    const sync = await syncGmailEvidenceToReviewQueue(store, config, [order], adapter);
+    expect(sync.possibleOrderMatches).toBe(0);
+    expect(db.query("SELECT match_reason FROM payment_email_review_receipts").get())
+      .toEqual({ match_reason: "OUTSIDE_PAYMENT_WINDOW" });
+    db.close();
+  });
+
+  test("missing trusted payment window is rejected despite timely email", async () => {
+    const { db, store } = setupStore();
+    const { adapter } = api();
+    const sync = await syncGmailEvidenceToReviewQueue(store, config, [
+      { orderId: order.orderId, currency: "INR", amountPaise: 48024, status: "PENDING" },
+    ], adapter);
+    expect(sync.possibleOrderMatches).toBe(0);
+    expect(db.query("SELECT match_reason FROM payment_email_review_receipts").get())
+      .toEqual({ match_reason: "TIME_DATA_MISSING" });
+    db.close();
+  });
+
+  test("same Gmail API message ID with changed received timestamp remains a conflict", async () => {
+    const { db, store } = setupStore();
+    const { adapter } = api();
+    await syncGmailEvidenceToReviewQueue(store, config, [order], adapter);
+    const { adapter: changed } = api({ full: {
+      ...message, internalDate: String(Date.parse("2026-11-07T06:29:43Z")),
+    } });
+    const sync = await syncGmailEvidenceToReviewQueue(store, config, [order], changed);
+    expect(sync.possibleOrderMatches).toBe(0);
+    expect(sync.repeatedOrConflicting).toBe(1);
+    db.close();
   });
 });
