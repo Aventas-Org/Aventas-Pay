@@ -94,7 +94,13 @@ async function verifySessionImpl(
   const providerRef = b.provider_transaction_ref as string;
   const now = deps.clock.now();
 
+  // Check already-paid orders first, independently of the idempotency key.
+  // Authenticated create allows caller-supplied keys, so a successful payment
+  // must remain replayable even when that key differs from the default.
+  // Paid takes precedence over any anomalous active row: never acknowledge
+  // a second receipt against an order already recorded as paid.
   const session =
+    (await deps.store.findPaidByOrderId(orderId)) ??
     (await deps.store.findActiveByOrderId(orderId, now)) ??
     (await deps.store.findLatestByIdempotencyKey(deriveIdempotencyKey(orderId)));
   if (!session || session.orderId !== orderId) {
