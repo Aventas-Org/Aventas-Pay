@@ -9,7 +9,6 @@
 
 import type { CheckoutSession, Clock, SessionStore } from "../domain/types";
 import { canTransition, effectiveStatus } from "../domain/stateMachine";
-import { deriveIdempotencyKey } from "../domain/idempotency";
 import { ApiError, rateLimited, validationError } from "../domain/errors";
 import { requireBotAuth } from "./auth";
 import type { RateLimiter } from "../domain/rateLimit";
@@ -61,15 +60,13 @@ async function cancelSessionImpl(
   }
 
   const now = deps.clock.now();
-  // Latest session for this order, active or terminal, so a repeated cancel is
-  // idempotent and returns the current state instead of a confusing 404.
-  const latest = await deps.store.findLatestByIdempotencyKey(
-    deriveIdempotencyKey(orderId),
-  );
+  // A trusted caller can supply a non-default idempotency key on create.
+  // Locate the order directly so cancellation remains idempotent after it is
+  // terminal; paid orders take precedence over any anomalous pending attempt.
   const session =
-    latest && latest.orderId === orderId
-      ? latest
-      : await deps.store.findActiveByOrderId(orderId, now);
+    (await deps.store.findPaidByOrderId(orderId)) ??
+    (await deps.store.findActiveByOrderId(orderId, now)) ??
+    (await deps.store.findLatestByOrderId(orderId));
   if (!session) {
     // Unknown order: generic not-found, no distinction leaked.
     throw new ApiError("NOT_FOUND", 404);
@@ -80,7 +77,7 @@ async function cancelSessionImpl(
   const status = effectiveStatus(session, now);
   if (!canTransition(status, "CANCELLED")) {
     return jsonResponse(200, {
-      ...toPublicSessionView(session),
+      ...toPublicSessionView(session, true),
       status,
     });
   }
@@ -99,9 +96,12 @@ async function cancelSessionImpl(
     });
   }
 
+  // Even a losing cancellation race must not hand the bot a QR/recipient
+  // from a paid, expired or concurrently cancelled session. A failed CAS
+  // cannot be treated as proof that payment is still permitted.
   return jsonResponse(200, {
-    ...toPublicSessionView(current ?? session),
-    status: current?.status ?? session.status,
+    ...toPublicSessionView(current ?? session, true),
+    status: effectiveStatus(current ?? session, now),
   });
 }
 

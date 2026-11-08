@@ -81,6 +81,8 @@ export interface SessionStore {  /**
   findPaidByOrderId(orderId: string): Promise<CheckoutSession | null>;
   /** Highest attempt recorded for an idempotency key (any status), if any. */
   findLatestByIdempotencyKey(key: string): Promise<CheckoutSession | null>;
+  /** Latest checkout attempt by authoritative order ID, regardless of caller key. */
+  findLatestByOrderId(orderId: string): Promise<CheckoutSession | null>;
   /**
    * Optimistic status transition: updates only when the current status matches
    * `from`. Returns false when the row was already transitioned concurrently.

@@ -156,6 +156,18 @@ export class SqlSessionStore implements SessionStore {
     return row ? fromDb(row) : null;
   }
 
+  async findLatestByOrderId(orderId: string): Promise<CheckoutSession | null> {
+    // rowid breaks ties when tests/Workers insert multiple attempts in the
+    // same millisecond; never infer the latest attempt from a caller's key.
+    const row = await this.db.get<SessionRow>(
+      `SELECT ${SESSION_COLUMNS} FROM checkout_sessions
+       WHERE order_id = ?
+       ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+      [orderId],
+    );
+    return row ? fromDb(row) : null;
+  }
+
   async updateStatus(
     sessionId: string,
     from: SessionStatus,

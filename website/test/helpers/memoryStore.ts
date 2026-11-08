@@ -73,6 +73,15 @@ export class InMemorySessionStore implements SessionStore {
     return matches.sort((a, b) => b.attempt - a.attempt)[0] ?? null;
   }
 
+  async findLatestByOrderId(orderId: string): Promise<CheckoutSession | null> {
+    // Preserve insertion order for same-millisecond attempts, as SQLite
+    // does with its rowid tie-breaker.
+    const matches = [...this.sessions.values()].filter((s) => s.orderId === orderId);
+    return matches.reduce<CheckoutSession | null>((latest, session) =>
+      !latest || session.createdAt.getTime() >= latest.createdAt.getTime() ? session : latest,
+      null);
+  }
+
   async updateStatus(
     sessionId: string,
     from: SessionStatus,

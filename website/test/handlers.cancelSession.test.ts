@@ -20,10 +20,14 @@ function makeEnv() {
     websiteBaseUrl: "https://avantas.example",
   };
   const cancelDeps = { store, clock, limiter, botApiSecret: BOT_SECRET, websiteBaseUrl: "https://avantas.example" };
-  return { deps, cancelDeps, store };
+  return { deps, cancelDeps, store, clock };
 }
 
-async function createOrder(deps: CreateSessionDeps, orderId = "AVT-2026-000123") {
+async function createOrder(
+  deps: CreateSessionDeps,
+  orderId = "AVT-2026-000123",
+  idempotencyKey?: string,
+) {
   const res = await handleCreateSession(deps, {
     method: "POST",
     path: "/payments/checkout-sessions",
@@ -38,6 +42,7 @@ async function createOrder(deps: CreateSessionDeps, orderId = "AVT-2026-000123")
       currency: "INR",
       payment_profile_id: "primary",
       upi: { vpa: "merchant@upi", display_name: "Aventas Store" },
+      ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
     }),
   });
   return JSON.parse(res.body);
@@ -81,6 +86,57 @@ describe("handleCancelSession", () => {
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
     expect(JSON.parse(second.body).status).toBe("CANCELLED");
+  });
+
+
+  test("custom-key cancellation and replay return the same terminal state without payment instructions", async () => {
+    const { deps, cancelDeps, store } = makeEnv();
+    const orderId = "AVT-CUSTOM-CANCEL-1";
+    await createOrder(deps, orderId, "custom-order-cancel-key-01");
+    for (let i = 0; i < 2; i++) {
+      const res = await handleCancelSession(cancelDeps, cancelRequest(orderId));
+      const body = JSON.parse(res.body);
+      expect(res.status).toBe(200);
+      expect(body.status).toBe("CANCELLED");
+      expect(body.upi).toEqual({ vpa: "", display_name: "" });
+      expect(body.qr_payload).toBe("");
+    }
+    expect(store.events.filter((e) => e.eventType === "SESSION_CANCELLED")).toHaveLength(1);
+  });
+
+  test("custom-key expired checkout is discoverable but not revived by late cancellation", async () => {
+    const { deps, cancelDeps, clock, store } = makeEnv();
+    const orderId = "AVT-CUSTOM-EXPIRED-1";
+    await createOrder(deps, orderId, "custom-order-expiry-key-01");
+    clock.current = new Date(clock.current.getTime() + 121000);
+    const res = await handleCancelSession(cancelDeps, cancelRequest(orderId));
+    const body = JSON.parse(res.body);
+    expect(res.status).toBe(200);
+    expect(body.status).toBe("EXPIRED");
+    expect(body.upi.vpa).toBe("");
+    expect(body.qr_payload).toBe("");
+    expect([...store.sessions.values()][0]!.status).toBe("PENDING");
+    expect(store.events.some((e) => e.eventType === "SESSION_CANCELLED")).toBe(false);
+  });
+
+  test("losing cancellation to concurrent verification cannot expose stale payment instructions", async () => {
+    const { deps, cancelDeps, store } = makeEnv();
+    await createOrder(deps);
+    const originalUpdate = store.updateStatus.bind(store);
+    store.updateStatus = async (id, from, to, now, providerRef) => {
+      if (to === "CANCELLED") {
+        await originalUpdate(id, from, "PAID", now, "BANK-RECEIPT-1");
+        return false;
+      }
+      return originalUpdate(id, from, to, now, providerRef);
+    };
+    const res = await handleCancelSession(cancelDeps, cancelRequest("AVT-2026-000123"));
+    const body = JSON.parse(res.body);
+    expect(res.status).toBe(200);
+    expect(body.status).toBe("PAID");
+    expect(body.upi.vpa).toBe("");
+    expect(body.qr_payload).toBe("");
+    expect(store.events.filter((e) => e.eventType === "SESSION_CANCELLED")).toHaveLength(0);
   });
 
   test("unknown order returns generic 404", async () => {
