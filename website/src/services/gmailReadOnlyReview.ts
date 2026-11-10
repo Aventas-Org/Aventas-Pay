@@ -170,6 +170,14 @@ export async function fetchGmailReviewEvidence(
 
   const listing = await requestJson(url.toString(), config.accessToken, fetcher);
   if (!isRecord(listing)) throw new Error("GMAIL_REVIEW_INVALID_RESPONSE");
+  // A single-page poll would silently miss older alerts when Gmail returns a
+  // continuation token. Fail visibly until durable backlog processing exists.
+  if (listing.nextPageToken !== undefined) {
+    if (typeof listing.nextPageToken !== "string" || !listing.nextPageToken) {
+      throw new Error("GMAIL_REVIEW_INVALID_RESPONSE");
+    }
+    throw new Error("GMAIL_REVIEW_BACKLOG");
+  }
   const messages = listing.messages;
   if (messages === undefined) return [];
   if (!Array.isArray(messages) || messages.length > config.maxMessages) {
