@@ -1,6 +1,7 @@
 /** Private Railway staging worker entrypoint; deliberately not bundled into a public API. */
 import { chooseMode, openReviewDb, reviewTick, POLL_MS } from "../src/services/stagingGmailWorkerCore";
 
+/** Run the private worker with one active tick and capped retry delays. */
 async function runForever(): Promise<void> {
   const env = process.env;
   if (env.APP_ENV !== "staging" || env.RAILWAY_ENVIRONMENT_NAME !== "staging") {

@@ -65,6 +65,7 @@ const validMs = (v: unknown): v is number =>
 const safeOrder = (x: unknown): x is string =>
   typeof x === "string" && /^[A-Za-z0-9._-]{1,64}$/.test(x);
 
+/** Load only trusted synthetic order windows from the isolated staging host. */
 export async function loadSyntheticStagingOrders(
   token: string,
   nowMs: number,
@@ -158,6 +159,7 @@ export function syntheticGoogleTransport(createdAtMs: number): Fetcher {
   }) as Fetcher;
 }
 
+/** Open the private SQLite database and apply idempotent evidence migrations. */
 export function openReviewDb(path: string = DB_PATH): {
   database: Database;
   executor: SqlExecutor;
@@ -183,6 +185,7 @@ export function openReviewDb(path: string = DB_PATH): {
   return { database, executor };
 }
 
+/** Load the staging snapshot before permitting a bounded OAuth review tick. */
 export async function reviewTick(
   executor: SqlExecutor,
   env: Env,
