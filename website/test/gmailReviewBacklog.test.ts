@@ -24,6 +24,7 @@ const ORDER = {
   paymentWindowEndMs: NOW,
 } as const;
 
+/** Synthetic Gmail fixture with two pages and optional cursor rejection. */
 function mail(rejectContinuation = false) {
   const queries: string[] = [];
   const fetcher: typeof fetch = Object.assign(async (input: RequestInfo | URL) => {

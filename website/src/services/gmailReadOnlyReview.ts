@@ -61,6 +61,7 @@ function validConfig(config: GmailReadOnlyConfig): boolean {
     config.maxMessages >= 1 && config.maxMessages <= MAX_MESSAGES;
 }
 
+/** Fetch Gmail JSON with redacted errors and a bounded request lifetime. */
 async function requestJson(
   url: string,
   token: string,
@@ -178,6 +179,7 @@ interface ScanWindow {
   readonly page_token: string | null;
 }
 
+/** Fetch one Gmail page inside a fixed window when a durable scan is active. */
 async function fetchEvidencePage(
   config: GmailReadOnlyConfig,
   fetcher: Fetcher,
@@ -314,6 +316,7 @@ export async function syncGmailEvidenceToReviewQueue(
 }
 
 
+/** Advance only the scan state that produced the page just persisted. */
 async function advanceScan(
   db: SqlExecutor,
   key: string[],
