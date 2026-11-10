@@ -25,11 +25,13 @@ async function runForever(): Promise<void> {
     intervalSeconds: POLL_MS / 1000, paymentVerified: false, canFulfill: false,
   }));
   let cycles = 0;
+  let consecutiveFailures = 0;
   try {
     while (!stopped) {
       cycles += 1;
       try {
         const result = await reviewTick(executor, env, startedAtMs, Date.now());
+        consecutiveFailures = 0;
         // Log only counts; no bodies, account IDs, access tokens or transaction refs.
         if (cycles === 1 || result.queued > 0 || cycles % 30 === 0) {
           console.info(JSON.stringify({
@@ -37,12 +39,15 @@ async function runForever(): Promise<void> {
           }));
         }
       } catch (error) {
-        // Expose only the known backlog condition, never upstream details.
+        consecutiveFailures += 1;
+        // Expose only known operational errors, never upstream details.
         console.error(error instanceof Error && error.message === "GMAIL_REVIEW_BACKLOG"
           ? "staging_gmail_review_backlog_detected"
-          : "staging_gmail_review_tick_unavailable");
+          : error instanceof Error && error.message === "GMAIL_REVIEW_CURSOR_REJECTED"
+            ? "staging_gmail_review_cursor_restarted"
+            : "staging_gmail_review_tick_unavailable");
       }
-      if (!stopped) await Bun.sleep(POLL_MS);
+      if (!stopped) await Bun.sleep(POLL_MS * 2 ** Math.min(consecutiveFailures, 3));
     }
   } finally {
     database.close();

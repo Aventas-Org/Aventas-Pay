@@ -32,6 +32,7 @@ export interface StagingGmailOAuthConfig {
   readonly nowMs: number;
   readonly maxMessages?: number;
   readonly lookbackHours?: number;
+  readonly durableBacklog?: boolean;
 }
 type Fetcher = typeof fetch;
 
@@ -94,6 +95,7 @@ export async function stagingReadOnlyGmailReviewTick(
       body,
       redirect: "error",
       cache: "no-store",
+      signal: AbortSignal.timeout(10_000),
     });
   } catch {
     throw new Error("STAGING_GMAIL_OAUTH_UNAVAILABLE");
@@ -123,5 +125,6 @@ export async function stagingReadOnlyGmailReviewTick(
     nowMs: config.nowMs,
     maxMessages: config.maxMessages ?? 10,
     lookbackHours: config.lookbackHours ?? 1,
+    durableBacklog: config.durableBacklog ?? false,
   }, trustedOrders, fetcher);
 }

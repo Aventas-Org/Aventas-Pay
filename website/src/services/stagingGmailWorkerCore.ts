@@ -79,6 +79,7 @@ export async function loadSyntheticStagingOrders(
       method: "POST",
       redirect: "error",
       cache: "no-store",
+      signal: AbortSignal.timeout(10_000),
       headers: { authorization: `Bearer ${token}` },
     });
   } catch {
@@ -169,6 +170,7 @@ export function openReviewDb(path: string = DB_PATH): {
   const database = new Database(path, { create: true });
   database.run("PRAGMA journal_mode=WAL");
   database.run(readFileSync(new URL("../../migrations/0004_email_review_reservations.sql", import.meta.url), "utf8"));
+  database.run(readFileSync(new URL("../../migrations/0005_gmail_review_scan.sql", import.meta.url), "utf8"));
   const executor: SqlExecutor = {
     run: async (q: string, p: SqlValue[]) => ({
       rowsAffected: Number(database.prepare(q).run(...p).changes),
@@ -241,7 +243,7 @@ export async function reviewTick(
     refreshToken: env.GMAIL_OAUTH_REFRESH_TOKEN!,
     mailboxConnectionId: env.GMAIL_MAILBOX_CONNECTION_ID!,
     candidateAlertSender: env.GMAIL_CREDIT_ALERT_SENDER!,
-    nowMs, lookbackHours: 1, maxMessages: 10,
+    nowMs, lookbackHours: 1, maxMessages: 10, durableBacklog: true,
   }, orders, fetcher);
   return {
     mode, examined: result.examined,
