@@ -143,8 +143,17 @@ describe("amount + Gmail internalDate + trusted order payment window", () => {
     expect(r.match).toBe("MULTIPLE_MATCHES");
     expect(r.candidateOrderId).toBeNull();
   });
-  test("a terminal order never becomes a candidate via matching time", () => {
+  test("only expired orders can match a trusted arrival window for review", () => {
     expect(match(start + 1000, [timed("PAID")]).match).toBe("NON_PENDING_ORDER");
+    expect(match(start + 1000, [timed("CANCELLED")]).match).toBe("NON_PENDING_ORDER");
+    expect(match(start + 1000, [timed("EXPIRED")])).toMatchObject({
+      classification: "NEEDS_REVIEW",
+      match: "SINGLE_POSSIBLE_ORDER",
+      paymentVerified: false,
+      canFulfill: false,
+    });
+    expect(match(start - 1, [timed("EXPIRED")]).match).toBe("OUTSIDE_PAYMENT_WINDOW");
+    expect(match(end + 120_001, [timed("EXPIRED")]).match).toBe("OUTSIDE_PAYMENT_WINDOW");
   });
   test("wrong amount is never rescued by an exact matching date/time", () => {
     const r = match(start + 1000, [{ ...timed(), amountPaise: 48025 }]);

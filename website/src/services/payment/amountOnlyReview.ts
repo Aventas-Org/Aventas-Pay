@@ -73,6 +73,15 @@ export function correlateUntrustedEmailAmount(
   evidence: UntrustedPaymentEvidence,
   ordersInReconciliationWindow: readonly ReviewOrderSnapshot[],
 ): AmountOnlyReviewResult {
+  return findReviewCandidate(evidence, ordersInReconciliationWindow, false);
+}
+
+/** Consider expired orders only when the caller will verify the arrival window. */
+function findReviewCandidate(
+  evidence: UntrustedPaymentEvidence,
+  ordersInReconciliationWindow: readonly ReviewOrderSnapshot[],
+  includeExpired: boolean,
+): AmountOnlyReviewResult {
   const fail = (match: AmountOnlyReviewResult["match"]): AmountOnlyReviewResult => ({
     classification: "NEEDS_REVIEW",
     paymentVerified: false,
@@ -94,7 +103,10 @@ export function correlateUntrustedEmailAmount(
   );
   if (matches.length === 0) return fail("NO_MATCH");
   if (matches.length !== 1) return fail("MULTIPLE_MATCHES");
-  if (matches[0]!.status !== "PENDING") return fail("NON_PENDING_ORDER");
+  const status = matches[0]!.status;
+  if (status !== "PENDING" && !(includeExpired && status === "EXPIRED")) {
+    return fail("NON_PENDING_ORDER");
+  }
   return {
     ...fail("SINGLE_POSSIBLE_ORDER"),
     candidateOrderId: matches[0]!.orderId,
@@ -116,7 +128,9 @@ export function correlateUntrustedEmailAmountWithReceivedTime(
   gmailReceivedAtMs: number | null | undefined,
   ordersInReconciliationWindow: readonly ReviewOrderSnapshot[],
 ): AmountOnlyReviewResult {
-  const base = correlateUntrustedEmailAmount(evidence, ordersInReconciliationWindow);
+  // Pagination or a restart can process an in-window alert after expiry.
+  // Expired orders are review candidates only when the trusted arrival window matches.
+  const base = findReviewCandidate(evidence, ordersInReconciliationWindow, true);
   if (base.match !== "SINGLE_POSSIBLE_ORDER") return base;
 
   const reject = (match: AmountOnlyReviewResult["match"]): AmountOnlyReviewResult => ({

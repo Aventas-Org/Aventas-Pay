@@ -73,7 +73,9 @@ test("resumes a fixed Gmail listing across a restart and deduplicates a crash re
     const first = await syncGmailEvidenceToReviewQueue(db.executor, later, [ORDER], transport.fetcher);
     expect(first.newlyStaged).toBe(0);
     expect(first.repeatedOrConflicting).toBe(1);
-    const second = await syncGmailEvidenceToReviewQueue(db.executor, later, [ORDER], transport.fetcher);
+    const second = await syncGmailEvidenceToReviewQueue(
+      db.executor, later, [{ ...ORDER, status: "EXPIRED" }], transport.fetcher,
+    );
     expect(second.newlyStaged).toBe(1);
     expect(second.possibleOrderMatches).toBe(1);
     expect(second.paymentVerified).toBe(false);
