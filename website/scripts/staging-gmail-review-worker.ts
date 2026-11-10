@@ -36,9 +36,11 @@ async function runForever(): Promise<void> {
             event: "staging_gmail_review_tick", ...result, cycles,
           }));
         }
-      } catch {
-        // Do not expose upstream error bodies, OAuth secrets or credit evidence.
-        console.error("staging_gmail_review_tick_unavailable");
+      } catch (error) {
+        // Expose only the known backlog condition, never upstream details.
+        console.error(error instanceof Error && error.message === "GMAIL_REVIEW_BACKLOG"
+          ? "staging_gmail_review_backlog_detected"
+          : "staging_gmail_review_tick_unavailable");
       }
       if (!stopped) await Bun.sleep(POLL_MS);
     }
