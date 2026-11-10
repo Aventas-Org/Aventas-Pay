@@ -140,6 +140,21 @@ describe("Gmail OAuth read-only evidence", () => {
     expect(await fetchGmailReviewEvidence(config, adapter)).toEqual([]);
   });
 
+  test("detects a truncated Gmail listing before reporting review results", async () => {
+    const { adapter, calls } = api({
+      listing: { messages: [{ id: messageId }], nextPageToken: "more-results" },
+    });
+    await expect(fetchGmailReviewEvidence(config, adapter)).rejects.toThrow("GMAIL_REVIEW_BACKLOG");
+    expect(calls).toHaveLength(1);
+  });
+
+  test("rejects malformed continuation tokens", async () => {
+    for (const token of ["", 123, null]) {
+      const { adapter } = api({ listing: { messages: [], nextPageToken: token } });
+      await expect(fetchGmailReviewEvidence(config, adapter)).rejects.toThrow("GMAIL_REVIEW_INVALID_RESPONSE");
+    }
+  });
+
   test("bad sender query, overwide interval and invalid token fail before requests", async () => {
     for (const invalid of [
       { ...config, candidateAlertSender: "alerts@example.test from:attacker.test" },
