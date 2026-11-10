@@ -53,6 +53,15 @@ jobs:
         run: |
           (cd website && bun audit)
           (cd frontend && bun audit)
+      # Evidence inventory is deliberately allowed to report NO-GO.
+      # Only schema/tests are CI checks; runtime and operator acceptance
+      # must never be inferred from a successful Actions run.
+      - name: Track A production release evidence (fail-closed audit)
+        run: |
+          node --test qa/release-gate.test.mjs
+          node qa/release-gate.mjs docs/release/track-a-qa-evidence-2026-11-10.json | tee /tmp/aventas-release-qa.txt
+          cat /tmp/aventas-release-qa.txt >> "$GITHUB_STEP_SUMMARY"
+
       - name: Report tested revision
         if: always()
         env:
