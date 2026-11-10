@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "track": "manual_verified_upi",
+  "audited_on": "2026-11-10",
+  "source_revisions": {
+    "pay": "a5d7f984ee9a576d216619c1ccd14d36d92c5780",
+    "website": "5de601297d129e9d459ec76d58bcbc4c5fac3964",
+    "bot": "896b6b5da8d0ed215ef179b83349635546861dcc"
+  },
+  "gates": {
+    "main_branch_ci": {
+      "status": "passed",
+      "reviewer_role": "Engineering / CI",
+      "evidence": [
+        "https://github.com/Aventas-Org/Aventas-Pay/actions/runs/42433073714",
+        "https://github.com/Aventas-Org/Aventas-website/actions/runs/42442652918",
+        "https://github.com/Aventas-Org/Aventas-bot/actions/runs/42398348911"
+      ]
+    },
+    "canonical_website_parity": {
+      "status": "passed",
+      "reviewer_role": "Engineering / CI",
+      "evidence": [
+        "https://github.com/Aventas-Org/Aventas-website/pull/186"
+      ]
+    },
+    "cloudflare_database_isolation": {
+      "status": "passed",
+      "reviewer_role": "Infrastructure audit / read-only",
+      "evidence": [
+        "https://github.com/Aventas-Org/Aventas-Pay/issues/8"
+      ]
+    },
+    "staging_checkout_schema": {
+      "status": "passed",
+      "reviewer_role": "Infrastructure audit / read-only",
+      "evidence": [
+        "https://github.com/Aventas-Org/Aventas-Pay/issues/8"
+      ]
+    },
+    "deployed_revision_parity": {
+      "status": "blocked",
+      "blocker": "Staging Worker version predates merged website checkout parity; staging bot and Gmail worker are pinned to older main revisions; no exact staged source-to-main parity proof.",
+      "evidence": [
+        "https://github.com/Aventas-Org/Aventas-Pay/issues/15"
+      ]
+    },
+    "isolated_discord_roles": {
+      "status": "blocked",
+      "blocker": "Test guild integration and durable volume are reported, but staff-role matrix, stale component recovery and rollback have not been independently accepted.",
+      "evidence": [
+        "https://github.com/Aventas-Org/Aventas-Pay/issues/9"
+      ]
+    },
+    "staged_checkout_negative_matrix": {
+      "status": "blocked",
+      "blocker": "Previous synthetic API acceptance does not cover the final merged website revision plus the complete bot, outage, timeout, QR, delivery and failure matrix.",
+      "evidence": [
+        "https://github.com/Aventas-Org/Aventas-Pay/issues/15"
+      ]
+    },
+    "durable_outbox_restart_recovery": {
+      "status": "blocked",
+      "blocker": "No complete controlled staging proof of the queue migration, transactional verification, bounded retries, NEEDS_REVIEW staff closure and restart recovery.",
+      "evidence": [
+        "https://github.com/Aventas-Org/Aventas-Pay/issues/16"
+      ]
+    },
+    "independent_bank_receipt_review": {
+      "status": "blocked",
+      "blocker": "Bank/PSP-backed merchant receipt review SOP, two-person exceptions and named payment reviewers have not been adopted or rehearsed.",
+      "evidence": [
+        "https://github.com/Aventas-Org/Aventas-Pay/issues/17"
+      ]
+    },
+    "privacy_refunds_customer_support": {
+      "status": "blocked",
+      "blocker": "No merchant-approved retention/deletion policy or proven refunds, disputes, mobile accessibility and support workflow acceptance.",
+      "evidence": [
+        "https://github.com/Aventas-Org/Aventas-Pay/issues/22"
+      ]
+    },
+    "gst_non_gst_invoice_policy": {
+      "status": "blocked",
+      "blocker": "The operator has not attested that the production sales flow stays legally correct with GST off, and any GST quote/payment/invoice binding still lacks qualified sign-off.",
+      "evidence": [
+        "https://github.com/Aventas-Org/Aventas-Pay/issues/19"
+      ]
+    },
+    "alerts_incident_and_rollback": {
+      "status": "blocked",
+      "blocker": "No verified alert-delivery threshold test, discrepancy ledger, staff-owned refund incident drill or recovery rehearsal.",
+      "evidence": [
+        "https://github.com/Aventas-Org/Aventas-Pay/issues/20"
+      ]
+    },
+    "signed_production_canary": {
+      "status": "blocked",
+      "blocker": "No signed go/no-go matrix, tested restore, production fail-closed runtime smoke, staffed canary and postlaunch reconciliation acceptance.",
+      "evidence": [
+        "https://github.com/Aventas-Org/Aventas-Pay/issues/23"
+      ]
+    }
+  },
+  "approvals": {
+    "ceo_release_owner": {
+      "status": "pending"
+    },
+    "payments_lead": {
+      "status": "pending"
+    },
+    "infra_security": {
+      "status": "pending"
+    },
+    "operations_support": {
+      "status": "pending"
+    },
+    "privacy_legal": {
+      "status": "pending"
+    }
+  }
+}
