@@ -211,11 +211,18 @@ async function fetchEvidencePage(
   const result: InboxEvidenceEnvelope[] = [];
   for (const item of messages) {
     if (!isRecord(item) || typeof item.id !== "string" ||
-        !MESSAGE_ID.test(item.id)) continue;
+        !MESSAGE_ID.test(item.id)) {
+      // A corrupt provider response must not acknowledge an incomplete page.
+      // Leave its durable checkpoint intact so a later tick can retry it.
+      throw new Error("GMAIL_REVIEW_INVALID_RESPONSE");
+    }
     if (seen.has(item.id)) continue;
     seen.add(item.id);
     const msgUrl = `${GMAIL_API}/${encodeURIComponent(item.id)}?format=full`;
     const full = await requestJson(msgUrl, config.accessToken, fetcher);
+    if (!isRecord(full) || full.id !== item.id) {
+      throw new Error("GMAIL_REVIEW_INVALID_RESPONSE");
+    }
     const envelope = readEnvelope(full as GmailMessage, config.mailboxConnectionId);
     if (envelope && envelope.mailboxMessageId === item.id) {
       result.push(envelope);

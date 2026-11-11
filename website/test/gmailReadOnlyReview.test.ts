@@ -179,8 +179,15 @@ describe("Gmail OAuth read-only evidence", () => {
     const { adapter, calls } = api({
       listing: { messages: [{ id: "../../bad" }, { id: "a".repeat(260) }] },
     });
-    expect(await fetchGmailReviewEvidence(config, adapter)).toEqual([]);
+    await expect(fetchGmailReviewEvidence(config, adapter))
+      .rejects.toThrow("GMAIL_REVIEW_INVALID_RESPONSE");
     expect(calls).toHaveLength(1);
+  });
+
+  test("a mismatched provider message ID rejects the page", async () => {
+    const { adapter } = api({ full: { ...message, id: "different-message" } });
+    await expect(fetchGmailReviewEvidence(config, adapter))
+      .rejects.toThrow("GMAIL_REVIEW_INVALID_RESPONSE");
   });
 
   test("oversized, malformed, or missing MIME body is ignored", async () => {

@@ -110,3 +110,44 @@ test("an invalid Gmail continuation restarts the original bounded range", async 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("malformed provider identities preserve the scan across restart and recover on retry", async () => {
+  for (const malformed of ["listing", "full"] as const) {
+    const dir = mkdtempSync(join(tmpdir(), "gmail-invalid-page-"));
+    const path = join(dir, "review.sqlite3");
+    let db = openReviewDb(path);
+    try {
+      const source = mail();
+      const broken: typeof fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input));
+        if (malformed === "listing" && url.pathname.endsWith("/messages")) {
+          return Response.json({ messages: [{ id: "../../invalid" }] });
+        }
+        const response = await source.fetcher(input, init);
+        if (malformed === "full" && !url.pathname.endsWith("/messages")) {
+          return Response.json({ ...(await response.json() as object), id: "wrong-id" });
+        }
+        return response;
+      }, { preconnect: fetch.preconnect });
+      await expect(syncGmailEvidenceToReviewQueue(db.executor, CONFIG, [ORDER], broken))
+        .rejects.toThrow("GMAIL_REVIEW_INVALID_RESPONSE");
+      expect(db.database.query("SELECT count(*) AS n FROM payment_email_review_receipts").get())
+        .toEqual({ n: 0 });
+      const checkpoint = db.database.query("SELECT * FROM gmail_review_scan").get();
+      db.database.close();
+      db = openReviewDb(path);
+      expect(db.database.query("SELECT * FROM gmail_review_scan").get()).toEqual(checkpoint);
+      const result = await syncGmailEvidenceToReviewQueue(
+        db.executor, { ...CONFIG, nowMs: NOW + 3_700_000 }, [ORDER], mail().fetcher,
+      );
+      expect(result.newlyStaged).toBe(1);
+      expect(result.paymentVerified).toBe(false);
+      expect(result.canFulfill).toBe(false);
+      expect(db.database.query("SELECT before_sec, page_token FROM gmail_review_scan").get())
+        .toEqual({ before_sec: NOW / 1000, page_token: "next" });
+    } finally {
+      db.database.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
