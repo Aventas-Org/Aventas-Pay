@@ -230,3 +230,46 @@ test("replay pagination resumes its fixed range after restart alongside the forw
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a failed forward page preserves its checkpoint while recent replay still stages evidence", async () => {
+  const dir = mkdtempSync(join("/tmp", "gmail-forward-failure-"));
+  const db = openReviewDb(join(dir, "review.sqlite3"));
+  const after = NOW / 1000 - 7200;
+  const before = NOW / 1000 - 3600;
+  const config = { ...CONFIG, replayRecent: true };
+  let replayRequests = 0;
+  const fetcher: typeof fetch = Object.assign(async (input: RequestInfo | URL) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith("/messages")) {
+      const forward = url.searchParams.get("pageToken") === "blocked";
+      if (!forward) replayRequests++;
+      return Response.json({ messages: [{ id: forward ? "gone" : "recent" }] });
+    }
+    if (url.pathname.endsWith("/gone")) return new Response(null, { status: 404 });
+    const source = await syntheticGoogleTransport(NOW - 60_000)(
+      "https://gmail.googleapis.com/gmail/v1/users/me/messages/test-gmail-qa-static-0001?format=full",
+    );
+    return Response.json({ ...(await source.json() as object), id: "recent" });
+  }, { preconnect: fetch.preconnect });
+  try {
+    await db.executor.run(
+      "INSERT INTO gmail_review_scan (mailbox_id, sender, after_sec, before_sec, page_token) VALUES (?, ?, ?, ?, ?)",
+      [CONFIG.mailboxConnectionId, CONFIG.candidateAlertSender, after, before, "blocked"],
+    );
+    for (let retry = 0; retry < 2; retry++) {
+      await expect(syncGmailEvidenceToReviewQueue(
+        db.executor, { ...config, nowMs: NOW + retry * 10_000 }, [ORDER], fetcher,
+      )).rejects.toThrow("GMAIL_REVIEW_UNAVAILABLE");
+      expect(db.database.query("SELECT after_sec, before_sec, page_token FROM gmail_review_scan WHERE sender = ?")
+        .get(CONFIG.candidateAlertSender)).toEqual({ after_sec: after, before_sec: before, page_token: "blocked" });
+      expect(db.database.query("SELECT count(*) AS n FROM payment_email_review_receipts").get())
+        .toEqual({ n: 1 });
+      expect(db.database.query("SELECT before_sec, page_token FROM gmail_review_scan WHERE sender = ?")
+        .get(`replay:${CONFIG.candidateAlertSender}`)).toEqual({ before_sec: null, page_token: null });
+    }
+    expect(replayRequests).toBe(2);
+  } finally {
+    db.database.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

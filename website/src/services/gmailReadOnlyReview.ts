@@ -253,9 +253,20 @@ export async function syncGmailEvidenceToReviewQueue(
   ordersInReconciliationWindow: readonly ReviewOrderSnapshot[],
   fetcher: Fetcher = fetch,
 ): Promise<GmailReviewSyncResult> {
-  const forward = await syncScanPage(db, config, ordersInReconciliationWindow, fetcher, false);
-  if (!config.durableBacklog || !config.replayRecent) return forward;
-  const replay = await syncScanPage(db, config, ordersInReconciliationWindow, fetcher, true);
+  const forwardResult = await syncScanPage(db, config, ordersInReconciliationWindow, fetcher, false)
+    .then(value => ({ value }), error => ({ error }));
+  if (!config.durableBacklog || !config.replayRecent) {
+    if ("error" in forwardResult) throw forwardResult.error;
+    return forwardResult.value;
+  }
+  // A stuck forward page must not starve recent evidence. Each lane keeps
+  // its own checkpoint; still surface failures so the scheduler backs off.
+  const replayResult = await syncScanPage(db, config, ordersInReconciliationWindow, fetcher, true)
+    .then(value => ({ value }), error => ({ error }));
+  if ("error" in forwardResult) throw forwardResult.error;
+  if ("error" in replayResult) throw replayResult.error;
+  const forward = forwardResult.value;
+  const replay = replayResult.value;
   return {
     examined: forward.examined + replay.examined,
     newlyStaged: forward.newlyStaged + replay.newlyStaged,
