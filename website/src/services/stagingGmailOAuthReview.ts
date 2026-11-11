@@ -32,10 +32,12 @@ export interface StagingGmailOAuthConfig {
   readonly nowMs: number;
   readonly maxMessages?: number;
   readonly lookbackHours?: number;
+  readonly durableBacklog?: boolean;
 }
 type Fetcher = typeof fetch;
 
-function valid(config: StagingGmailOAuthConfig): boolean {
+/** Validate server configuration before storage or Gmail requests are permitted. */
+export function isValidStagingGmailOAuthConfig(config: StagingGmailOAuthConfig): boolean {
   return !!config && config.appEnv === "staging" && config.enabled === "true" &&
     typeof config.clientId === "string" && config.clientId.length >= 10 &&
     config.clientId.length <= MAX_CONFIG_CHARS &&
@@ -72,7 +74,7 @@ export async function stagingReadOnlyGmailReviewTick(
   trustedOrders: readonly ReviewOrderSnapshot[],
   fetcher: Fetcher = fetch,
 ): Promise<GmailReviewSyncResult> {
-  if (!valid(config) || !Array.isArray(trustedOrders) ||
+  if (!isValidStagingGmailOAuthConfig(config) || !Array.isArray(trustedOrders) ||
       trustedOrders.length > 1000) {
     throw new Error("STAGING_GMAIL_REVIEW_DISABLED");
   }
@@ -94,6 +96,7 @@ export async function stagingReadOnlyGmailReviewTick(
       body,
       redirect: "error",
       cache: "no-store",
+      signal: AbortSignal.timeout(10_000),
     });
   } catch {
     throw new Error("STAGING_GMAIL_OAUTH_UNAVAILABLE");
@@ -123,5 +126,7 @@ export async function stagingReadOnlyGmailReviewTick(
     nowMs: config.nowMs,
     maxMessages: config.maxMessages ?? 10,
     lookbackHours: config.lookbackHours ?? 1,
+    durableBacklog: config.durableBacklog ?? false,
+    replayRecent: config.durableBacklog ?? false,
   }, trustedOrders, fetcher);
 }

@@ -30,6 +30,9 @@ export interface GmailReadOnlyConfig {
   readonly nowMs: number;
   readonly lookbackHours: number;
   readonly maxMessages: number;
+  readonly durableBacklog?: boolean;
+  /** Revisit recent completed ranges using an independent durable cursor. */
+  readonly replayRecent?: boolean;
 }
 
 type Fetcher = typeof fetch;
@@ -60,10 +63,12 @@ function validConfig(config: GmailReadOnlyConfig): boolean {
     config.maxMessages >= 1 && config.maxMessages <= MAX_MESSAGES;
 }
 
+/** Fetch Gmail JSON with redacted errors and a bounded request lifetime. */
 async function requestJson(
   url: string,
   token: string,
   fetcher: Fetcher,
+  continuation = false,
 ): Promise<unknown> {
   let response: Response;
   try {
@@ -74,9 +79,13 @@ async function requestJson(
         accept: "application/json",
       },
       redirect: "error",
+      signal: AbortSignal.timeout(10_000),
     });
   } catch {
     throw new Error("GMAIL_REVIEW_UNAVAILABLE");
+  }
+  if (continuation && response.status === 400) {
+    throw new Error("GMAIL_REVIEW_CURSOR_REJECTED");
   }
   if (!response.ok) throw new Error("GMAIL_REVIEW_UNAVAILABLE");
   try {
@@ -163,15 +172,40 @@ export async function fetchGmailReviewEvidence(
   const cutoff = Math.floor((config.nowMs - config.lookbackHours * 3_600_000) / 1000);
   if (cutoff <= 0) throw new Error("INVALID_GMAIL_REVIEW_CONFIG");
 
+  return (await fetchEvidencePage(config, fetcher, cutoff)).emails;
+}
+
+interface ScanWindow {
+  readonly after_sec: number;
+  readonly before_sec: number;
+  readonly page_token: string | null;
+}
+
+/** Fetch one Gmail page inside a fixed window when a durable scan is active. */
+async function fetchEvidencePage(
+  config: GmailReadOnlyConfig,
+  fetcher: Fetcher,
+  after: number,
+  window?: ScanWindow,
+): Promise<{ emails: InboxEvidenceEnvelope[]; nextPageToken: string | null }> {
   const url = new URL(GMAIL_API);
-  url.searchParams.set("q", `after:${cutoff} from:${config.candidateAlertSender}`);
+  const before = window ? ` before:${window.before_sec}` : "";
+  url.searchParams.set("q", `after:${after}${before} from:${config.candidateAlertSender}`);
   url.searchParams.set("maxResults", String(config.maxMessages));
   url.searchParams.set("includeSpamTrash", "false");
+  if (window?.page_token) url.searchParams.set("pageToken", window.page_token);
 
-  const listing = await requestJson(url.toString(), config.accessToken, fetcher);
+  const listing = await requestJson(url.toString(), config.accessToken, fetcher, !!window?.page_token);
   if (!isRecord(listing)) throw new Error("GMAIL_REVIEW_INVALID_RESPONSE");
-  const messages = listing.messages;
-  if (messages === undefined) return [];
+  const token = listing.nextPageToken;
+  if (token !== undefined) {
+    if (typeof token !== "string" || token.length === 0 || token.length > 4096) {
+      throw new Error("GMAIL_REVIEW_INVALID_RESPONSE");
+    }
+    if (!window) throw new Error("GMAIL_REVIEW_BACKLOG");
+    if (token === window.page_token) throw new Error("GMAIL_REVIEW_INVALID_RESPONSE");
+  }
+  const messages = listing.messages === undefined ? [] : listing.messages;
   if (!Array.isArray(messages) || messages.length > config.maxMessages) {
     throw new Error("GMAIL_REVIEW_INVALID_RESPONSE");
   }
@@ -179,17 +213,24 @@ export async function fetchGmailReviewEvidence(
   const result: InboxEvidenceEnvelope[] = [];
   for (const item of messages) {
     if (!isRecord(item) || typeof item.id !== "string" ||
-        !MESSAGE_ID.test(item.id)) continue;
+        !MESSAGE_ID.test(item.id)) {
+      // A corrupt provider response must not acknowledge an incomplete page.
+      // Leave its durable checkpoint intact so a later tick can retry it.
+      throw new Error("GMAIL_REVIEW_INVALID_RESPONSE");
+    }
     if (seen.has(item.id)) continue;
     seen.add(item.id);
     const msgUrl = `${GMAIL_API}/${encodeURIComponent(item.id)}?format=full`;
     const full = await requestJson(msgUrl, config.accessToken, fetcher);
+    if (!isRecord(full) || full.id !== item.id) {
+      throw new Error("GMAIL_REVIEW_INVALID_RESPONSE");
+    }
     const envelope = readEnvelope(full as GmailMessage, config.mailboxConnectionId);
     if (envelope && envelope.mailboxMessageId === item.id) {
       result.push(envelope);
     }
   }
-  return result;
+  return { emails: result, nextPageToken: token ?? null };
 }
 
 export interface GmailReviewSyncResult {
@@ -212,7 +253,84 @@ export async function syncGmailEvidenceToReviewQueue(
   ordersInReconciliationWindow: readonly ReviewOrderSnapshot[],
   fetcher: Fetcher = fetch,
 ): Promise<GmailReviewSyncResult> {
-  const emails = await fetchGmailReviewEvidence(config, fetcher);
+  const forwardResult = await syncScanPage(db, config, ordersInReconciliationWindow, fetcher, false)
+    .then(value => ({ value }), error => ({ error }));
+  if (!config.durableBacklog || !config.replayRecent) {
+    if ("error" in forwardResult) throw forwardResult.error;
+    return forwardResult.value;
+  }
+  // A stuck forward page must not starve recent evidence. Each lane keeps
+  // its own checkpoint; still surface failures so the scheduler backs off.
+  const replayResult = await syncScanPage(db, config, ordersInReconciliationWindow, fetcher, true)
+    .then(value => ({ value }), error => ({ error }));
+  if ("error" in forwardResult) throw forwardResult.error;
+  if ("error" in replayResult) throw replayResult.error;
+  const forward = forwardResult.value;
+  const replay = replayResult.value;
+  return {
+    examined: forward.examined + replay.examined,
+    newlyStaged: forward.newlyStaged + replay.newlyStaged,
+    repeatedOrConflicting: forward.repeatedOrConflicting + replay.repeatedOrConflicting,
+    possibleOrderMatches: forward.possibleOrderMatches + replay.possibleOrderMatches,
+    paymentVerified: false,
+    canFulfill: false,
+  };
+}
+
+/** Process one bounded page; replay and forward progress have separate checkpoints. */
+async function syncScanPage(
+  db: SqlExecutor,
+  config: GmailReadOnlyConfig,
+  ordersInReconciliationWindow: readonly ReviewOrderSnapshot[],
+  fetcher: Fetcher,
+  replay: boolean,
+): Promise<GmailReviewSyncResult> {
+  if (!validConfig(config)) throw new Error("INVALID_GMAIL_REVIEW_CONFIG");
+  // ':' cannot occur in a configured sender address. This reserved scan key
+  // never changes the actual Gmail query or the mailbox evidence identity.
+  const key = [config.mailboxConnectionId,
+    (replay ? "replay:" : "") + config.candidateAlertSender.toLowerCase()];
+  let window: ScanWindow | undefined;
+  let nextPageToken: string | null = null;
+  let emails: readonly InboxEvidenceEnvelope[];
+  if (config.durableBacklog) {
+    const before = Math.floor(config.nowMs / 1000);
+    const cutoff = before - config.lookbackHours * 3600;
+    if (cutoff <= 0) throw new Error("INVALID_GMAIL_REVIEW_CONFIG");
+    // Persist the fixed query before contacting Gmail. A restart resumes the
+    // same time range even when the rolling lookback would move past it.
+    await db.run(
+      `INSERT INTO gmail_review_scan (mailbox_id, sender, after_sec, before_sec)
+       VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING`,
+      [...key, cutoff, before],
+    );
+    await db.run(
+      `UPDATE gmail_review_scan SET before_sec = ?
+       WHERE mailbox_id = ? AND sender = ? AND before_sec IS NULL AND after_sec + 1 < ?`,
+      [before, ...key, before],
+    );
+    const state = await db.get<Omit<ScanWindow, "before_sec"> & { before_sec: number | null }>(
+      `SELECT after_sec, before_sec, page_token FROM gmail_review_scan
+       WHERE mailbox_id = ? AND sender = ?`, key,
+    );
+    if (!state) throw new Error("GMAIL_REVIEW_CURSOR_UNAVAILABLE");
+    if (state.before_sec === null) {
+      emails = [];
+    } else {
+      window = { ...state, before_sec: state.before_sec };
+      try {
+        ({ emails, nextPageToken } = await fetchEvidencePage(config, fetcher, window.after_sec, window));
+      } catch (error) {
+        if (error instanceof Error && error.message === "GMAIL_REVIEW_CURSOR_REJECTED") {
+          // Re-enumerate the original range. Previously queued evidence deduplicates by Gmail ID.
+          await advanceScan(db, key, window, null, false);
+        }
+        throw error;
+      }
+    }
+  } else {
+    emails = await fetchGmailReviewEvidence(config, fetcher);
+  }
   let newlyStaged = 0;
   let repeatedOrConflicting = 0;
   let possibleOrderMatches = 0;
@@ -228,6 +346,10 @@ export async function syncGmailEvidenceToReviewQueue(
       repeatedOrConflicting += 1;
     }
   }
+  // A crash before this write replays a page. Durable evidence insertion is
+  // idempotent and always precedes the checkpoint.
+  if (window) await advanceScan(db, key, window, nextPageToken, nextPageToken === null,
+    replay ? Math.max(1, window.before_sec - config.lookbackHours * 3600) : undefined);
   return {
     examined: emails.length,
     newlyStaged,
@@ -236,4 +358,26 @@ export async function syncGmailEvidenceToReviewQueue(
     paymentVerified: false,
     canFulfill: false,
   };
+}
+
+
+/** Advance only the scan state that produced the page just persisted. */
+async function advanceScan(
+  db: SqlExecutor,
+  key: string[],
+  window: ScanWindow,
+  token: string | null,
+  complete: boolean,
+  replayAfterSec?: number,
+): Promise<void> {
+  // Overlap one second at the boundary to cover Gmail's second-based filters.
+  const result = await db.run(
+    `UPDATE gmail_review_scan SET after_sec = ?, before_sec = ?, page_token = ?
+     WHERE mailbox_id = ? AND sender = ? AND after_sec = ? AND before_sec = ?
+       AND page_token IS ?`,
+    [complete ? (replayAfterSec ?? window.before_sec - 1) : window.after_sec,
+      complete ? null : window.before_sec, token, ...key,
+      window.after_sec, window.before_sec, window.page_token],
+  );
+  if (result.rowsAffected !== 1) throw new Error("GMAIL_REVIEW_CURSOR_CONFLICT");
 }
