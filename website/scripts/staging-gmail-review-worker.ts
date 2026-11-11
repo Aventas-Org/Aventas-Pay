@@ -10,6 +10,11 @@ async function runForever(): Promise<void> {
     return;
   }
   const mode = chooseMode(env);
+  if (mode === "disabled" && (env.GMAIL_REVIEW_MODE ?? "disabled") !== "disabled") {
+    console.error("staging_gmail_review_configuration_rejected");
+    process.exitCode = 1;
+    return;
+  }
   // No access to Gmail or bank in disabled/synthetic mode.
   if (mode === "oauth" && env.RAILWAY_VOLUME_MOUNT_PATH !== "/data") {
     console.error("staging_gmail_review_durable_volume_required");
