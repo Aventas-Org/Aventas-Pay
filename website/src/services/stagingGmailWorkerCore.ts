@@ -13,7 +13,11 @@ import { Database } from "bun:sqlite";
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { SqlExecutor, SqlValue } from "../adapters/sqlPort";
-import { stagingReadOnlyGmailReviewTick } from "./stagingGmailOAuthReview";
+import {
+  isValidStagingGmailOAuthConfig,
+  stagingReadOnlyGmailReviewTick,
+  type StagingGmailOAuthConfig,
+} from "./stagingGmailOAuthReview";
 import type { ReviewOrderSnapshot } from "./payment/amountOnlyReview";
 
 const STAGING_SNAPSHOT_URL =
@@ -34,6 +38,20 @@ function eligible(env: Env): boolean {
   return env.APP_ENV === "staging" && env.RAILWAY_ENVIRONMENT_NAME === "staging";
 }
 
+/** Build the same OAuth configuration for startup checks and reconciliation ticks. */
+function oauthConfig(env: Env, nowMs: number): StagingGmailOAuthConfig {
+  return {
+    appEnv: env.APP_ENV ?? "",
+    enabled: env.GMAIL_REVIEW_ENABLED ?? "",
+    clientId: env.GMAIL_OAUTH_CLIENT_ID ?? "",
+    clientSecret: env.GMAIL_OAUTH_CLIENT_SECRET ?? "",
+    refreshToken: env.GMAIL_OAUTH_REFRESH_TOKEN ?? "",
+    mailboxConnectionId: env.GMAIL_MAILBOX_CONNECTION_ID ?? "",
+    candidateAlertSender: env.GMAIL_CREDIT_ALERT_SENDER ?? "",
+    nowMs, lookbackHours: 1, maxMessages: 10, durableBacklog: true,
+  };
+}
+
 export function chooseMode(env: Env): WorkerMode {
   if (!eligible(env)) return "disabled";
   if (env.GMAIL_REVIEW_MODE === "synthetic") return "synthetic";
@@ -45,13 +63,8 @@ export function chooseMode(env: Env): WorkerMode {
       env.STAGING_GMAIL_SNAPSHOT_TOKEN.length >= 43 &&
       env.STAGING_GMAIL_SNAPSHOT_TOKEN.length <= 256) return "snapshot_probe";
   if (env.GMAIL_REVIEW_MODE === "oauth" &&
-      env.GMAIL_REVIEW_ENABLED === "true" &&
       env.RAILWAY_VOLUME_MOUNT_PATH === "/data" &&
-      typeof env.GMAIL_OAUTH_CLIENT_ID === "string" &&
-      typeof env.GMAIL_OAUTH_CLIENT_SECRET === "string" &&
-      typeof env.GMAIL_OAUTH_REFRESH_TOKEN === "string" &&
-      typeof env.GMAIL_CREDIT_ALERT_SENDER === "string" &&
-      typeof env.GMAIL_MAILBOX_CONNECTION_ID === "string" &&
+      isValidStagingGmailOAuthConfig(oauthConfig(env, 1)) &&
       typeof env.STAGING_GMAIL_SNAPSHOT_TOKEN === "string" &&
       env.STAGING_GMAIL_SNAPSHOT_TOKEN.length >= 43 &&
       env.STAGING_GMAIL_SNAPSHOT_TOKEN.length <= 256) return "oauth";
@@ -239,15 +252,9 @@ export async function reviewTick(
     mode, examined: 0, queued: 0, matched: 0,
     paymentVerified: false, canFulfill: false,
   };
-  const result = await stagingReadOnlyGmailReviewTick(executor, {
-    appEnv: "staging", enabled: "true",
-    clientId: env.GMAIL_OAUTH_CLIENT_ID!,
-    clientSecret: env.GMAIL_OAUTH_CLIENT_SECRET!,
-    refreshToken: env.GMAIL_OAUTH_REFRESH_TOKEN!,
-    mailboxConnectionId: env.GMAIL_MAILBOX_CONNECTION_ID!,
-    candidateAlertSender: env.GMAIL_CREDIT_ALERT_SENDER!,
-    nowMs, lookbackHours: 1, maxMessages: 10, durableBacklog: true,
-  }, orders, fetcher);
+  const result = await stagingReadOnlyGmailReviewTick(
+    executor, oauthConfig(env, nowMs), orders, fetcher,
+  );
   return {
     mode, examined: result.examined,
     queued: result.newlyStaged, matched: result.possibleOrderMatches,

@@ -1,17 +1,36 @@
 import { expect, test } from "bun:test";
+import { fileURLToPath } from "node:url";
+import { chooseMode } from "../src/services/stagingGmailWorkerCore";
 
-test("requested OAuth polling fails before opening storage when credentials are absent", async () => {
+const BASE_ENV = {
+  APP_ENV: "staging",
+  RAILWAY_ENVIRONMENT_NAME: "staging",
+  RAILWAY_VOLUME_MOUNT_PATH: "/data",
+  GMAIL_REVIEW_MODE: "oauth",
+  GMAIL_REVIEW_ENABLED: "true",
+  STAGING_GMAIL_SNAPSHOT_TOKEN: "synthetic-snapshot-token-000000000000000000000000",
+};
+const OAUTH_ENV = {
+  GMAIL_OAUTH_CLIENT_ID: "synthetic-client-id",
+  GMAIL_OAUTH_CLIENT_SECRET: "synthetic-client-secret",
+  GMAIL_OAUTH_REFRESH_TOKEN: "synthetic-refresh-token",
+  GMAIL_MAILBOX_CONNECTION_ID: "synthetic-mailbox",
+  GMAIL_CREDIT_ALERT_SENDER: "alerts@example.test",
+};
+
+test.each([
+  ["missing credentials", {}],
+  ["empty client ID", { ...OAUTH_ENV, GMAIL_OAUTH_CLIENT_ID: "" }],
+  ["short client secret", { ...OAUTH_ENV, GMAIL_OAUTH_CLIENT_SECRET: "short" }],
+  ["empty refresh token", { ...OAUTH_ENV, GMAIL_OAUTH_REFRESH_TOKEN: "" }],
+  ["invalid sender", { ...OAUTH_ENV, GMAIL_CREDIT_ALERT_SENDER: "invalid" }],
+  ["invalid mailbox ID", { ...OAUTH_ENV, GMAIL_MAILBOX_CONNECTION_ID: "invalid/mailbox" }],
+] as const)("requested OAuth mode rejects %s before opening storage", async (_, credentials) => {
   const worker = Bun.spawn([
     process.execPath,
-    new URL("../scripts/staging-gmail-review-worker.ts", import.meta.url).pathname,
+    fileURLToPath(new URL("../scripts/staging-gmail-review-worker.ts", import.meta.url)),
   ], {
-    env: {
-      APP_ENV: "staging",
-      RAILWAY_ENVIRONMENT_NAME: "staging",
-      RAILWAY_VOLUME_MOUNT_PATH: "/data",
-      GMAIL_REVIEW_MODE: "oauth",
-      GMAIL_REVIEW_ENABLED: "true",
-    },
+    env: { ...BASE_ENV, ...credentials },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -26,4 +45,8 @@ test("requested OAuth polling fails before opening storage when credentials are 
   } finally {
     worker.kill();
   }
+});
+
+test("valid OAuth configuration keeps the requested polling mode", () => {
+  expect(chooseMode({ ...BASE_ENV, ...OAUTH_ENV })).toBe("oauth");
 });
