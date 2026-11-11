@@ -31,6 +31,8 @@ export interface GmailReadOnlyConfig {
   readonly lookbackHours: number;
   readonly maxMessages: number;
   readonly durableBacklog?: boolean;
+  /** Revisit recent completed ranges using an independent durable cursor. */
+  readonly replayRecent?: boolean;
 }
 
 type Fetcher = typeof fetch;
@@ -251,8 +253,32 @@ export async function syncGmailEvidenceToReviewQueue(
   ordersInReconciliationWindow: readonly ReviewOrderSnapshot[],
   fetcher: Fetcher = fetch,
 ): Promise<GmailReviewSyncResult> {
+  const forward = await syncScanPage(db, config, ordersInReconciliationWindow, fetcher, false);
+  if (!config.durableBacklog || !config.replayRecent) return forward;
+  const replay = await syncScanPage(db, config, ordersInReconciliationWindow, fetcher, true);
+  return {
+    examined: forward.examined + replay.examined,
+    newlyStaged: forward.newlyStaged + replay.newlyStaged,
+    repeatedOrConflicting: forward.repeatedOrConflicting + replay.repeatedOrConflicting,
+    possibleOrderMatches: forward.possibleOrderMatches + replay.possibleOrderMatches,
+    paymentVerified: false,
+    canFulfill: false,
+  };
+}
+
+/** Process one bounded page; replay and forward progress have separate checkpoints. */
+async function syncScanPage(
+  db: SqlExecutor,
+  config: GmailReadOnlyConfig,
+  ordersInReconciliationWindow: readonly ReviewOrderSnapshot[],
+  fetcher: Fetcher,
+  replay: boolean,
+): Promise<GmailReviewSyncResult> {
   if (!validConfig(config)) throw new Error("INVALID_GMAIL_REVIEW_CONFIG");
-  const key = [config.mailboxConnectionId, config.candidateAlertSender.toLowerCase()];
+  // ':' cannot occur in a configured sender address. This reserved scan key
+  // never changes the actual Gmail query or the mailbox evidence identity.
+  const key = [config.mailboxConnectionId,
+    (replay ? "replay:" : "") + config.candidateAlertSender.toLowerCase()];
   let window: ScanWindow | undefined;
   let nextPageToken: string | null = null;
   let emails: readonly InboxEvidenceEnvelope[];
@@ -311,7 +337,8 @@ export async function syncGmailEvidenceToReviewQueue(
   }
   // A crash before this write replays a page. Durable evidence insertion is
   // idempotent and always precedes the checkpoint.
-  if (window) await advanceScan(db, key, window, nextPageToken, nextPageToken === null);
+  if (window) await advanceScan(db, key, window, nextPageToken, nextPageToken === null,
+    replay ? Math.max(1, window.before_sec - config.lookbackHours * 3600) : undefined);
   return {
     examined: emails.length,
     newlyStaged,
@@ -330,13 +357,14 @@ async function advanceScan(
   window: ScanWindow,
   token: string | null,
   complete: boolean,
+  replayAfterSec?: number,
 ): Promise<void> {
   // Overlap one second at the boundary to cover Gmail's second-based filters.
   const result = await db.run(
     `UPDATE gmail_review_scan SET after_sec = ?, before_sec = ?, page_token = ?
      WHERE mailbox_id = ? AND sender = ? AND after_sec = ? AND before_sec = ?
        AND page_token IS ?`,
-    [complete ? window.before_sec - 1 : window.after_sec,
+    [complete ? (replayAfterSec ?? window.before_sec - 1) : window.after_sec,
       complete ? null : window.before_sec, token, ...key,
       window.after_sec, window.before_sec, window.page_token],
   );

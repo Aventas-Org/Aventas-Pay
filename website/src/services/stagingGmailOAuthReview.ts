@@ -127,5 +127,6 @@ export async function stagingReadOnlyGmailReviewTick(
     maxMessages: config.maxMessages ?? 10,
     lookbackHours: config.lookbackHours ?? 1,
     durableBacklog: config.durableBacklog ?? false,
+    replayRecent: config.durableBacklog ?? false,
   }, trustedOrders, fetcher);
 }

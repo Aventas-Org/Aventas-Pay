@@ -94,3 +94,21 @@ The endpoint is unavailable in production and exposes only non-PAID synthetic te
 ## One-time authenticated connection probe
 
 Before enabling Gmail OAuth, set `GMAIL_REVIEW_MODE=snapshot_probe` while the private snapshot token is present. This makes the worker query ONLY the bounded, non-PAID staging synthetic order snapshot feed every 10 seconds. It does not call Google, insert email receipts or verify any payment. Check the Railway deploy log for `staging_gmail_review_tick`, `mode=snapshot_probe` and no `staging_gmail_review_tick_unavailable`. Restore `GMAIL_REVIEW_MODE=synthetic` immediately after confirming the connection. Never leave the probe enabled as a production mode.
+
+## Durable recent-message replay
+
+OAuth backlog polling processes at most one forward page and one recent replay
+page per tick. Both use fixed query windows and independent SQLite checkpoints
+in `gmail_review_scan`. The internal `replay:` sender-key namespace is not sent
+to Gmail and does not change the message deduplication identity. Completed
+replay scans restart from the beginning of the configured lookback window;
+unfinished replay pages retain their original window across restarts. The
+forward cursor continues advancing separately. No additional migration is
+needed for these scan rows.
+
+This catches messages which become searchable after their original forward
+scan completes, within the replay horizon (currently one hour in the worker).
+It does not guarantee recovery for messages indexed later than that horizon;
+those require an operator reconciliation. Malformed provider identities reject
+the entire page before evidence writes or checkpoint advancement. Queue entries
+remain review-only, including late, conflicting and repeated candidates.

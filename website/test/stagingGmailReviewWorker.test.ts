@@ -175,7 +175,7 @@ describe("Private Railway staging Gmail read-only review runner", () => {
       }) as unknown as typeof fetch;
       const result = await reviewTick(executor, full, startedAtMs, startedAtMs + 2000, fake);
       expect(result).toMatchObject({
-        mode: "oauth", examined: 1, queued: 1, matched: 1,
+        mode: "oauth", examined: 2, queued: 1, matched: 1,
         paymentVerified: false, canFulfill: false,
       });
       expect(requests).toBeGreaterThanOrEqual(3);
