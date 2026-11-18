@@ -33,10 +33,11 @@ export function canTransition(from: SessionStatus, to: SessionStatus): boolean {
  * rows are capped without a destructive production migration.
  */
 export function effectiveExpiryMs(session: CheckoutSession): number {
-  return Math.min(
-    session.expiresAt.getTime(),
-    session.createdAt.getTime() + MAX_PAYABLE_TTL_SECONDS * 1000,
-  );
+  // For the isolated Pay host, link-preview expiry is distinct from the
+  // 120s payment window. A PAID update also requires an active DB activation.
+  const cap = session.source === "discord_bot_paynow"
+    ? 30 * 60_000 : MAX_PAYABLE_TTL_SECONDS * 1000;
+  return Math.min(session.expiresAt.getTime(), session.createdAt.getTime() + cap);
 }
 
 /** True only while a pending session is before its hard deadline. */
