@@ -14,7 +14,7 @@ const mock = (body: unknown, status=200) => (async (url: RequestInfo|URL,init?:R
   expect(init?.method).toBe("POST");
   expect(String(init?.body)).toContain("grant_type=refresh_token");
   return json(body,status);
-}) as typeof fetch;
+}) as unknown as typeof fetch;
 
 describe("private Gmail refresh-token OAuth handling", () => {
   test("accepts Google Bearer token with required scope and extra granted scopes", async () => {
@@ -26,7 +26,7 @@ describe("private Gmail refresh-token OAuth handling", () => {
       scope: "openid https://www.googleapis.com/auth/gmail.readonly email",
     }));
     expect(token).toBe("opaque-access-token-12345");
-    const second=await oauth.token(oauthEnv, (async()=>{throw Error("unexpected refresh");}) as typeof fetch);
+    const second=await oauth.token(oauthEnv, (async()=>{throw Error("unexpected refresh");}) as unknown as typeof fetch);
     expect(second).toBe(token);
   });
   test("accepts Google's valid reply when refresh response omits scope", async () => {
@@ -57,7 +57,7 @@ describe("private Gmail refresh-token OAuth handling", () => {
     }))).rejects.toThrow("OAUTH_INVALID_TOKEN_RESPONSE");
   });
   test("distinguishes transport failures from credential errors", async () => {
-    const fetcher=(async()=>{throw Error("network failure details with token");}) as typeof fetch;
+    const fetcher=(async()=>{throw Error("network failure details with token");}) as unknown as typeof fetch;
     await expect(new OAuthCache().token(oauthEnv,fetcher))
       .rejects.toThrow("OAUTH_TRANSPORT_ERROR");
   });
