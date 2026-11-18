@@ -1,9 +1,9 @@
 /** Parse Gmail API messages as data; never execute HTML. */
 function normalizedSubject(subject:string):string {
-  return subject.replace(/=\?utf-8\?([bq])\?([^?]+)\?=/gi,(orig,kind,txt)=>{
+  return subject.replace(/=\?utf-8\?([bq])\?([^?]+)\?=/gi,(orig:string,kind:string,txt:string)=>{
     try {
       if(String(kind).toLowerCase()==="b")return Buffer.from(txt,"base64").toString("utf8");
-      return Buffer.from(txt.replace(/_/g," ").replace(/=([0-9a-f]{2})/gi,(_,hex)=>String.fromCharCode(parseInt(hex,16))),"binary").toString("utf8");
+      return Buffer.from(txt.replace(/_/g," ").replace(/=([0-9a-f]{2})/gi,(_:string,hex:string)=>String.fromCharCode(parseInt(hex,16))),"binary").toString("utf8");
     }catch{return orig;}
   });
 }
