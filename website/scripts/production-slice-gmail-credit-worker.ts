@@ -141,15 +141,16 @@ export async function scanOnce(env:Env,store:SeenStore,cache:OAuthCache,
   const headers={authorization:"Bearer "+env.SLICE_EMAIL_INGEST_SECRET,accept:"application/json"};
   const snapshot=await fetchJson(fetcher,ORIGIN+"/api/internal/slice-email/sessions",{
     method:"GET",headers,
-  });
+  }).catch(()=>{throw Error("SLICE_SNAPSHOT_UNAVAILABLE");});
   if(!Array.isArray(snapshot.eligible)||snapshot.eligible.length>100)throw Error("INVALID_SNAPSHOT");
   if(snapshot.eligible.length===0)return {eligible:0,examined:0,approved:0,review:0};
 
-  const accessToken=await cache.token(env,fetcher);
+  const accessToken=await cache.token(env,fetcher).catch(()=>{throw Error("SLICE_GMAIL_OAUTH_UNAVAILABLE");});
   const list=await fetchJson(fetcher,GMAIL+"?"+new URLSearchParams({
     q:"from:noreply@slice.bank.in subject:Received newer_than:2d",
     maxResults:"30",
-  }),{method:"GET",headers:{authorization:"Bearer "+accessToken}});
+  }),{method:"GET",headers:{authorization:"Bearer "+accessToken}})
+    .catch(()=>{throw Error("SLICE_GMAIL_LIST_UNAVAILABLE");});
   if(list.messages!==undefined && (!Array.isArray(list.messages)||list.messages.length>30))
     throw Error("INVALID_GMAIL_LIST");
   let examined=0,approved=0,review=0;
@@ -158,7 +159,7 @@ export async function scanOnce(env:Env,store:SeenStore,cache:OAuthCache,
       store.seen(entry.id))continue;
     const message=await fetchJson(fetcher,GMAIL+"/"+encodeURIComponent(entry.id)+"?format=full",{
       method:"GET",headers:{authorization:"Bearer "+accessToken},
-    });
+    }).catch(()=>{throw Error("SLICE_GMAIL_MESSAGE_UNAVAILABLE");});
     examined++;
     const evidence=parseGmailMessage(message);
     if(!evidence){
@@ -195,9 +196,16 @@ async function main():Promise<void>{
         if(result.approved||result.review||cycles%30===1){
           console.info(JSON.stringify({event:"slice_email_scan",...result,cycles}));
         }
-      }catch{
+      }catch(error){
         failures++;
-        console.error("slice_email_scan_unavailable");
+        const reason=error instanceof Error && [
+          "SLICE_SNAPSHOT_UNAVAILABLE","SLICE_GMAIL_OAUTH_UNAVAILABLE",
+          "SLICE_GMAIL_LIST_UNAVAILABLE","SLICE_GMAIL_MESSAGE_UNAVAILABLE",
+          "EMAIL_APPROVAL_UNAVAILABLE","PRODUCTION_EMAIL_DISABLED",
+        ].includes(error.message)?error.message:"slice_email_scan_unavailable";
+        // Stage-only diagnosis; NEVER echo OAuth response, bank message,
+        // account numbers, secret material or customer data.
+        console.error(reason);
       }
       if(!stopped)await Bun.sleep(POLL_MS*2**Math.min(3,failures));
     }
