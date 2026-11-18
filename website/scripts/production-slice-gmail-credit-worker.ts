@@ -7,12 +7,12 @@
  * that bank funds settled. Immutable D1 approval + bot CAS gate fulfillment.
  */
 import { Database } from "bun:sqlite";
+import { OAuthCache } from "../src/services/googleOAuthRefresh.ts";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
 const ORIGIN = "https://pay.aventasgaming.com";
 const GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me/messages";
-const TOKEN_URL = "https://oauth2.googleapis.com/token";
 export const POLL_MS = 5_000;
 const PATH = "/data/aventas-slice-credit-production.sqlite3";
 type Fetcher = typeof fetch;
@@ -108,33 +108,6 @@ export function sqliteSeenDb(path=PATH):{database:Database;store:SeenStore}{
     },
   }};
 }
-export class OAuthCache {
-  private access="";
-  private until=0;
-  async token(env:Env,fetcher:Fetcher,now=Date.now()):Promise<string>{
-    if(this.access && now<this.until) return this.access;
-    const body=new URLSearchParams({
-      client_id:env.GMAIL_OAUTH_CLIENT_ID!,
-      client_secret:env.GMAIL_OAUTH_CLIENT_SECRET!,
-      refresh_token:env.GMAIL_OAUTH_REFRESH_TOKEN!,
-      grant_type:"refresh_token",
-    });
-    const result=await fetchJson(fetcher,TOKEN_URL,{
-      method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},
-      body,
-    });
-    if(result.token_type!=="Bearer" || typeof result.access_token!=="string" ||
-      result.access_token.length<10 || typeof result.expires_in!=="number" ||
-      result.expires_in<60 || result.expires_in>7200 ||
-      (result.scope!==undefined &&
-       result.scope!=="https://www.googleapis.com/auth/gmail.readonly")) {
-      throw Error("OAUTH_INVALID");
-    }
-    this.access=result.access_token;
-    this.until=now+(result.expires_in-60)*1000;
-    return this.access;
-  }
-}
 export async function scanOnce(env:Env,store:SeenStore,cache:OAuthCache,
   fetcher:Fetcher=fetch):Promise<{eligible:number;examined:number;approved:number;review:number}> {
   if(!validProductionEnv(env))throw Error("PRODUCTION_EMAIL_DISABLED");
@@ -145,7 +118,16 @@ export async function scanOnce(env:Env,store:SeenStore,cache:OAuthCache,
   if(!Array.isArray(snapshot.eligible)||snapshot.eligible.length>100)throw Error("INVALID_SNAPSHOT");
   if(snapshot.eligible.length===0)return {eligible:0,examined:0,approved:0,review:0};
 
-  const accessToken=await cache.token(env,fetcher).catch(()=>{throw Error("SLICE_GMAIL_OAUTH_UNAVAILABLE");});
+  const accessToken=await cache.token(env,fetcher).catch(error=>{
+    const safe=new Set([
+      "OAUTH_TRANSPORT_ERROR","OAUTH_NONJSON_RESPONSE","OAUTH_INVALID_GRANT",
+      "OAUTH_INVALID_CLIENT","OAUTH_UNAUTHORIZED_CLIENT","OAUTH_ACCESS_DENIED",
+      "OAUTH_INVALID_SCOPE","OAUTH_PROVIDER_UNAVAILABLE","OAUTH_TOKEN_REJECTED",
+      "OAUTH_INVALID_TOKEN_RESPONSE","OAUTH_SCOPE_MISMATCH",
+    ]);
+    if(error instanceof Error && safe.has(error.message)) throw error;
+    throw Error("SLICE_GMAIL_OAUTH_UNAVAILABLE");
+  });
   const list=await fetchJson(fetcher,GMAIL+"?"+new URLSearchParams({
     q:"from:noreply@slice.bank.in subject:Received newer_than:2d",
     maxResults:"30",
@@ -202,6 +184,10 @@ async function main():Promise<void>{
           "SLICE_SNAPSHOT_UNAVAILABLE","SLICE_GMAIL_OAUTH_UNAVAILABLE",
           "SLICE_GMAIL_LIST_UNAVAILABLE","SLICE_GMAIL_MESSAGE_UNAVAILABLE",
           "EMAIL_APPROVAL_UNAVAILABLE","PRODUCTION_EMAIL_DISABLED",
+          "OAUTH_TRANSPORT_ERROR","OAUTH_NONJSON_RESPONSE","OAUTH_INVALID_GRANT",
+          "OAUTH_INVALID_CLIENT","OAUTH_UNAUTHORIZED_CLIENT","OAUTH_ACCESS_DENIED",
+          "OAUTH_INVALID_SCOPE","OAUTH_PROVIDER_UNAVAILABLE","OAUTH_TOKEN_REJECTED",
+          "OAUTH_INVALID_TOKEN_RESPONSE","OAUTH_SCOPE_MISMATCH",
         ].includes(error.message)?error.message:"slice_email_scan_unavailable";
         // Stage-only diagnosis; NEVER echo OAuth response, bank message,
         // account numbers, secret material or customer data.
