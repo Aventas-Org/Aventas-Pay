@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { OAuthCache } from "../scripts/production-slice-gmail-credit-worker";
+import { OAuthCache } from "../src/services/googleOAuthRefresh";
 
 const oauthEnv = {
   GMAIL_OAUTH_CLIENT_ID: "test-client-id-not-real",
