@@ -46,6 +46,7 @@ export interface CreateSessionDeps {
   tokenSecret: string;
   /** Public base URL of the Aventas website, e.g. "https://avantas.example". */
   websiteBaseUrl: string;
+  payNowPreview?: boolean;
   /** Structured logger; defaults to silent. Wire consoleLogger in production. */
   logger?: CheckoutLogger;
 }
@@ -172,11 +173,14 @@ async function createSessionImpl(
     status: "PENDING",
     idempotencyKey: key,
     attempt: nextAttempt(latestForKey),
-    source: "discord_bot",
+    source: deps.payNowPreview ? "discord_bot_paynow" : "discord_bot",
     providerTransactionRef: null,
     createdAt: now,
     updatedAt: now,
-    expiresAt: new Date(now.getTime() + Math.min(input.ttlSeconds, MAX_PAYABLE_TTL_SECONDS) * 1000),
+    // Preview is never payable: activation starts a separate 120s window.
+    expiresAt: new Date(now.getTime() + (deps.payNowPreview
+      ? 30 * 60_000
+      : Math.min(input.ttlSeconds, MAX_PAYABLE_TTL_SECONDS) * 1000)),
     paidAt: null,
   };
 

@@ -175,6 +175,33 @@ export class SqlSessionStore implements SessionStore {
     now: Date,
     providerTransactionRef?: string | null,
   ): Promise<boolean> {
+    // The trusted PAID endpoint must not mark a Pay Now preview paid until
+    // a server-recorded, still-valid 120-second activation exists. This
+    // condition is evaluated inside the SAME atomic UPDATE as the transition.
+    // Legacy non-Pay Now sessions retain their previous expiry contract.
+    if (to === "PAID") {
+      const row = await this.db.get<{ source: string }>(
+        "SELECT source FROM checkout_sessions WHERE id = ?", [sessionId],
+      );
+      if (row?.source === "discord_bot_paynow") {
+        const paid = await this.db.run(
+          `UPDATE checkout_sessions
+           SET status = 'PAID', updated_at = ?,
+               paid_at = ?, provider_transaction_ref = ?
+           WHERE id = ? AND status = 'PENDING'
+             AND expires_at > ? AND created_at > ?
+             AND EXISTS (
+               SELECT 1 FROM checkout_paynow_activations AS a
+               WHERE a.session_id = checkout_sessions.id
+                 AND a.activated_at_ms <= ? AND a.expires_at_ms > ?
+             )`,
+          [toDb(now), toDb(now), providerTransactionRef ?? null,
+           sessionId, toDb(now), toDb(now) - 30 * 60_000,
+           toDb(now), toDb(now)],
+        );
+        return paid.rowsAffected > 0;
+      }
+    }
     const { rowsAffected } = await this.db.run(
       `UPDATE checkout_sessions
        SET status = ?,
