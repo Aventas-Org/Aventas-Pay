@@ -6,15 +6,14 @@
  * This is a merchant-authorized EMAIL approval policy; it does not certify
  * that bank funds settled. Immutable D1 approval + bot CAS gate fulfillment.
  */
-import { Database } from "bun:sqlite";
 import { OAuthCache } from "../src/services/googleOAuthRefresh.ts";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { parseGmailMessage } from "../src/services/sliceGmailMessage.ts";
+import { sqliteSeenDb, parseReplayIds } from "../src/services/sliceGmailSeenStore.ts";
+import type { SeenStore } from "../src/services/sliceGmailSeenStore.ts";
 
 const ORIGIN = "https://pay.aventasgaming.com";
 const GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me/messages";
 export const POLL_MS = 5_000;
-const PATH = "/data/aventas-slice-credit-production.sqlite3";
 type Fetcher = typeof fetch;
 type Env = Readonly<Record<string,string|undefined>>;
 
@@ -40,73 +39,6 @@ async function fetchJson(fetcher:Fetcher,url:string,init:RequestInit):Promise<Re
   catch {throw Error("UPSTREAM_UNAVAILABLE");}
   if(!response.ok) throw Error("UPSTREAM_UNAVAILABLE");
   try{return parseBody(await response.json());}catch{throw Error("UPSTREAM_INVALID");}
-}
-function normalizedSubject(subject:string):string {
-  // Slice uses UTF-8 Q-encoding for INR symbol in some Gmail API payloads.
-  return subject.replace(/=\?utf-8\?([bq])\?([^?]+)\?=/gi, (orig,kind,txt)=>{
-    try {
-      if (String(kind).toLowerCase()==="b") return Buffer.from(txt,"base64").toString("utf8");
-      return Buffer.from(txt.replace(/_/g," ").replace(/=([0-9a-f]{2})/gi,(_,hex)=>String.fromCharCode(parseInt(hex,16))),"binary").toString("utf8");
-    } catch {return orig;}
-  });
-}
-function payloadBody(payload:unknown,depth=0):string|null {
-  if (!payload || typeof payload!=="object" || depth>5) return null;
-  const p=payload as Record<string,unknown>;
-  if(p.mimeType==="text/plain" && p.body && typeof p.body==="object"){
-    const b=(p.body as Record<string,unknown>).data;
-    if(typeof b==="string" && b.length<=30_000) {
-      try{return Buffer.from(b,"base64url").toString("utf8");}catch{return null;}
-    }
-  }
-  if(Array.isArray(p.parts)){
-    for(const part of p.parts){
-      const t=payloadBody(part,depth+1);
-      if(t) return t;
-    }
-  }
-  return null;
-}
-function header(payload:unknown,name:string):string {
-  const p=payload as {headers?:{name?:string;value?:string}[]}|null;
-  const h=p?.headers?.find(x=>x.name?.toLowerCase()===name.toLowerCase());
-  return typeof h?.value==="string"?h.value:"";
-}
-export function parseGmailMessage(msg:unknown):Record<string,unknown>|null {
-  if (!msg || typeof msg!=="object") return null;
-  const m=msg as Record<string,unknown>;
-  if(typeof m.id!=="string"||!/^[a-f0-9]{12,32}$/.test(m.id)||
-     typeof m.internalDate!=="string"|| !/^\d{13}$/.test(m.internalDate))return null;
-  const body=payloadBody(m.payload);
-  if(!body) return null;
-  const subject=normalizedSubject(header(m.payload,"subject"));
-  return {
-    gmail_message_id:m.id,
-    internal_date_ms:Number(m.internalDate),
-    from:header(m.payload,"from"),
-    authentication_results:header(m.payload,"authentication-results"),
-    subject,body,
-  };
-}
-
-export interface SeenStore {
-  seen(id:string):boolean;
-  mark(id:string,state:string):void;
-}
-export function sqliteSeenDb(path=PATH):{database:Database;store:SeenStore}{
-  if(!path.startsWith("/data/")&&!path.startsWith("/tmp/"))throw Error("BAD_VOLUME");
-  mkdirSync(dirname(path),{recursive:true});
-  const database=new Database(path,{create:true});
-  database.run("PRAGMA journal_mode=WAL");
-  database.run(`CREATE TABLE IF NOT EXISTS processed_messages
-   (gmail_id TEXT PRIMARY KEY,decision TEXT NOT NULL,processed_at INTEGER NOT NULL)`);
-  return {database,store:{
-    seen:(id)=>!!database.prepare("SELECT 1 FROM processed_messages WHERE gmail_id=?").get(id),
-    mark:(id,state)=>{
-      database.prepare("INSERT OR IGNORE INTO processed_messages VALUES(?,?,?)")
-        .run(id,state,Date.now());
-    },
-  }};
 }
 export async function scanOnce(env:Env,store:SeenStore,cache:OAuthCache,
   fetcher:Fetcher=fetch):Promise<{eligible:number;examined:number;approved:number;review:number}> {
@@ -163,7 +95,10 @@ export async function scanOnce(env:Env,store:SeenStore,cache:OAuthCache,
 async function main():Promise<void>{
   const env=process.env;
   if(!validProductionEnv(env)){console.error("slice_email_production_configuration_rejected");process.exitCode=1;return;}
-  const {database,store}=sqliteSeenDb();
+  let replayIds:ReadonlySet<string>;
+  try {replayIds=parseReplayIds(env.SLICE_EMAIL_REPLAY_UNPARSEABLE_IDS);}
+  catch {console.error("slice_email_replay_configuration_rejected");process.exitCode=1;return;}
+  const {database,store}=sqliteSeenDb(undefined,replayIds);
   const cache=new OAuthCache();
   let stopped=false;let failures=0;let cycles=0;
   process.on("SIGTERM",()=>{stopped=true;});
