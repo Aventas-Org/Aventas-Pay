@@ -150,7 +150,7 @@ export class OAuthCache {
     // Google can return additional scopes on an otherwise valid grant.
     // Check membership rather than rejecting an entire space-delimited list.
     const scopes=typeof result.scope==="string"
-      ? result.scope.trim().split(/\\s+/) : null;
+      ? result.scope.trim().split(/\s+/) : null;
     if(typeof result.token_type!=="string" ||
        result.token_type.toLowerCase()!=="bearer" ||
        typeof result.access_token!=="string" ||
