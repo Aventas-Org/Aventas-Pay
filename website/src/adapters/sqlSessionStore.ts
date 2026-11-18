@@ -125,29 +125,30 @@ export class SqlSessionStore implements SessionStore {
   }
 
   async findActiveByOrderId(orderId: string, now: Date): Promise<CheckoutSession | null> {
-    // Unlike legacy sessions (120-second expiry from link creation), hosted
-    // Pay Now sessions are 30-minute NONPAYABLE previews. An activation that
-    // has timed out is terminal even if the preview link has not yet expired.
-    // Replays should return the active preview, never silently create another.
+    // Hosted Pay Now is a 30-minute NONPAYABLE preview. Legacy sessions are
+    // strictly 120 seconds from creation. The new activation table is only
+    // queried for Pay Now rows: older databases/legacy unit tests that have
+    // not received the additive migration remain operational.
     const row = await this.db.get<SessionRow>(
       `SELECT ${SESSION_COLUMNS} FROM checkout_sessions
        WHERE order_id = ? AND status = 'PENDING'
          AND expires_at > ?
-         AND (
-           (source = 'discord_bot_paynow'
-             AND created_at > ?
-             AND NOT EXISTS (
-               SELECT 1 FROM checkout_paynow_activations AS a
-               WHERE a.session_id = checkout_sessions.id
-                 AND a.expires_at_ms <= ?
-             ))
-           OR (source <> 'discord_bot_paynow' AND created_at > ?)
-         )
+         AND ((source = 'discord_bot_paynow' AND created_at > ?)
+           OR (source <> 'discord_bot_paynow' AND created_at > ?))
        ORDER BY created_at DESC, rowid DESC LIMIT 1`,
       [orderId, toDb(now), toDb(now) - 30 * 60_000,
-        toDb(now), toDb(now) - MAX_PAYABLE_TTL_SECONDS * 1000],
+        toDb(now) - MAX_PAYABLE_TTL_SECONDS * 1000],
     );
-    return row ? fromDb(row) : null;
+    if (!row) return null;
+    if (row.source === 'discord_bot_paynow') {
+      const activation = await this.db.get<{ expires_at_ms: number }>(
+        'SELECT expires_at_ms FROM checkout_paynow_activations WHERE session_id = ?',
+        [row.id],
+      );
+      // A 2-minute activation cannot be extended or reused after expiry.
+      if (activation && activation.expires_at_ms <= now.getTime()) return null;
+    }
+    return fromDb(row);
   }
 
   async findPaidByOrderId(orderId: string): Promise<CheckoutSession | null> {
