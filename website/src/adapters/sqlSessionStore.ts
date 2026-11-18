@@ -125,15 +125,30 @@ export class SqlSessionStore implements SessionStore {
   }
 
   async findActiveByOrderId(orderId: string, now: Date): Promise<CheckoutSession | null> {
-    // "Active" is evaluated in SQL: PENDING and strictly before expiry.
+    // Hosted Pay Now is a 30-minute NONPAYABLE preview. Legacy sessions are
+    // strictly 120 seconds from creation. The new activation table is only
+    // queried for Pay Now rows: older databases/legacy unit tests that have
+    // not received the additive migration remain operational.
     const row = await this.db.get<SessionRow>(
       `SELECT ${SESSION_COLUMNS} FROM checkout_sessions
        WHERE order_id = ? AND status = 'PENDING'
-         AND expires_at > ? AND created_at > ?
-       ORDER BY attempt DESC LIMIT 1`,
-      [orderId, toDb(now), toDb(now) - MAX_PAYABLE_TTL_SECONDS * 1000],
+         AND expires_at > ?
+         AND ((source = 'discord_bot_paynow' AND created_at > ?)
+           OR (source <> 'discord_bot_paynow' AND created_at > ?))
+       ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+      [orderId, toDb(now), toDb(now) - 30 * 60_000,
+        toDb(now) - MAX_PAYABLE_TTL_SECONDS * 1000],
     );
-    return row ? fromDb(row) : null;
+    if (!row) return null;
+    if (row.source === 'discord_bot_paynow') {
+      const activation = await this.db.get<{ expires_at_ms: number }>(
+        'SELECT expires_at_ms FROM checkout_paynow_activations WHERE session_id = ?',
+        [row.id],
+      );
+      // A 2-minute activation cannot be extended or reused after expiry.
+      if (activation && activation.expires_at_ms <= now.getTime()) return null;
+    }
+    return fromDb(row);
   }
 
   async findPaidByOrderId(orderId: string): Promise<CheckoutSession | null> {
@@ -146,14 +161,27 @@ export class SqlSessionStore implements SessionStore {
     return row ? fromDb(row) : null;
   }
 
-  async findLatestByIdempotencyKey(key: string): Promise<CheckoutSession | null> {
+  async findLatestByIdempotencyKey(key: string, now: Date = new Date()): Promise<CheckoutSession | null> {
     const row = await this.db.get<SessionRow>(
       `SELECT ${SESSION_COLUMNS} FROM checkout_sessions
        WHERE idempotency_key = ?
        ORDER BY attempt DESC LIMIT 1`,
       [key],
     );
-    return row ? fromDb(row) : null;
+    if (!row) return null;
+    const latest = fromDb(row);
+    if (latest.source === 'discord_bot_paynow' && latest.status === 'PENDING') {
+      const activation = await this.db.get<{ expires_at_ms: number }>(
+        'SELECT expires_at_ms FROM checkout_paynow_activations WHERE session_id = ?',
+        [latest.id],
+      );
+      // Preserve the attempt number for nextAttempt(), but do not return an
+      // already-expired Pay Now window as a reusable PENDING session.
+      if (activation && activation.expires_at_ms <= now.getTime()) {
+        return { ...latest, status: 'EXPIRED' };
+      }
+    }
+    return latest;
   }
 
   async findLatestByOrderId(orderId: string): Promise<CheckoutSession | null> {

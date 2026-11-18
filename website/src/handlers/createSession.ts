@@ -149,7 +149,7 @@ async function createSessionImpl(
 
   // 5. Dedupe by idempotency key: replay returns the in-flight/active attempt.
   const key = input.idempotencyKey || deriveIdempotencyKey(input.orderId);
-  const latestForKey = await deps.store.findLatestByIdempotencyKey(key);
+  const latestForKey = await deps.store.findLatestByIdempotencyKey(key, now);
   const reusable = reusableSession(latestForKey, now);
   if (reusable) {
     requireIdenticalPaymentFacts(input, reusable);

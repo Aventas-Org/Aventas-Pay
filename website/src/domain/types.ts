@@ -80,7 +80,7 @@ export interface SessionStore {  /**
   /** Any already-paid session for an order; paid orders cannot be reopened. */
   findPaidByOrderId(orderId: string): Promise<CheckoutSession | null>;
   /** Highest attempt recorded for an idempotency key (any status), if any. */
-  findLatestByIdempotencyKey(key: string): Promise<CheckoutSession | null>;
+  findLatestByIdempotencyKey(key: string, now?: Date): Promise<CheckoutSession | null>;
   /** Latest checkout attempt by authoritative order ID, regardless of caller key. */
   findLatestByOrderId(orderId: string): Promise<CheckoutSession | null>;
   /**
