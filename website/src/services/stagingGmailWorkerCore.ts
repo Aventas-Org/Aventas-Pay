@@ -22,7 +22,7 @@ import type { ReviewOrderSnapshot } from "./payment/amountOnlyReview";
 
 const STAGING_SNAPSHOT_URL =
   "https://pay-staging.aventasgaming.com/api/internal/staging-gmail-snapshot";
-export const POLL_MS = 10_000;
+export const POLL_MS = 5_000;
 const DB_PATH = "/data/aventas-gmail-review.sqlite3";
 const SYNTHETIC_FROM = "alerts@example.test";
 const SYNTHETIC_TOKEN = "fake-staging-token-no-google-traffic";

@@ -22,7 +22,7 @@ Mandatory baseline variables:
 - `RAILWAY_ENVIRONMENT_NAME=staging` (set by Railway)
 - `RAILWAY_VOLUME_MOUNT_PATH=/data` (provided by Railway volume)
 
-The worker executes one tick every **10 seconds**. The synthetic test
+The worker executes one tick every **5 seconds**. The synthetic test
 transport never calls Google, and the same synthetic Gmail message
 deduplicates durably in `/data/aventas-gmail-review.sqlite3` after its
 first match. Logs include mode, counts, cycle number and explicit
@@ -93,7 +93,7 @@ The endpoint is unavailable in production and exposes only non-PAID synthetic te
 
 ## One-time authenticated connection probe
 
-Before enabling Gmail OAuth, set `GMAIL_REVIEW_MODE=snapshot_probe` while the private snapshot token is present. This makes the worker query ONLY the bounded, non-PAID staging synthetic order snapshot feed every 10 seconds. It does not call Google, insert email receipts or verify any payment. Check the Railway deploy log for `staging_gmail_review_tick`, `mode=snapshot_probe` and no `staging_gmail_review_tick_unavailable`. Restore `GMAIL_REVIEW_MODE=synthetic` immediately after confirming the connection. Never leave the probe enabled as a production mode.
+Before enabling Gmail OAuth, set `GMAIL_REVIEW_MODE=snapshot_probe` while the private snapshot token is present. This makes the worker query ONLY the bounded, non-PAID staging synthetic order snapshot feed every 5 seconds. It does not call Google, insert email receipts or verify any payment. Check the Railway deploy log for `staging_gmail_review_tick`, `mode=snapshot_probe` and no `staging_gmail_review_tick_unavailable`. Restore `GMAIL_REVIEW_MODE=synthetic` immediately after confirming the connection. Never leave the probe enabled as a production mode.
 
 ## Durable recent-message replay
 

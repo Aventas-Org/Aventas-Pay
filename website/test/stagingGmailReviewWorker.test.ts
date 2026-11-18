@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  chooseMode, loadSyntheticStagingOrders, openReviewDb, reviewTick,
+  chooseMode, loadSyntheticStagingOrders, openReviewDb, reviewTick, POLL_MS,
   syntheticGoogleTransport,
 } from "../src/services/stagingGmailWorkerCore";
 
@@ -14,6 +14,9 @@ const stage = {
 };
 
 describe("Private Railway staging Gmail read-only review runner", () => {
+  test("checks for review candidates every five seconds", () => {
+    expect(POLL_MS).toBe(5_000);
+  });
   test("always defaults off and excludes production despite seemingly complete credentials", () => {
     expect(chooseMode({})).toBe("disabled");
     expect(chooseMode({ APP_ENV: "production", RAILWAY_ENVIRONMENT_NAME: "staging", GMAIL_REVIEW_MODE: "synthetic" }))
@@ -24,7 +27,7 @@ describe("Private Railway staging Gmail read-only review runner", () => {
     expect(chooseMode(stage)).toBe("synthetic");
   });
 
-  test("synthetic mode gets fake Google credit and durably deduplicates it every 10-second cycle", async () => {
+  test("synthetic mode gets fake Google credit and durably deduplicates it every five-second cycle", async () => {
     const dir = mkdtempSync(join(tmpdir(), "aventas-review-"));
     const { database, executor } = openReviewDb(join(dir, "qa.sqlite3"));
     try {
@@ -38,7 +41,7 @@ describe("Private Railway staging Gmail read-only review runner", () => {
         paymentVerified: false, canFulfill: false,
       });
       const repeated = await reviewTick(executor, stage, startedAtMs,
-        startedAtMs + 12_000, alwaysBlockExternalNetwork);
+        startedAtMs + 7_000, alwaysBlockExternalNetwork);
       expect(repeated).toEqual({
         mode: "synthetic", examined: 1, queued: 0, matched: 0,
         paymentVerified: false, canFulfill: false,
@@ -140,7 +143,7 @@ describe("Private Railway staging Gmail read-only review runner", () => {
     }finally{database.close();rmSync(dir,{recursive:true,force:true});}
   });
 
-  test("OAuth mode requires every secret, the 10-second worker remains review-only", async () => {
+  test("OAuth mode requires every secret, the five-second worker remains review-only", async () => {
     const full = {
       ...stage, GMAIL_REVIEW_MODE: "oauth",
       GMAIL_REVIEW_ENABLED: "true",
