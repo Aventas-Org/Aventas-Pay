@@ -119,17 +119,49 @@ export class OAuthCache {
       refresh_token:env.GMAIL_OAUTH_REFRESH_TOKEN!,
       grant_type:"refresh_token",
     });
-    const result=await fetchJson(fetcher,TOKEN_URL,{
-      method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},
-      body,
-    });
-    if(result.token_type!=="Bearer" || typeof result.access_token!=="string" ||
-      result.access_token.length<10 || typeof result.expires_in!=="number" ||
-      result.expires_in<60 || result.expires_in>7200 ||
-      (result.scope!==undefined &&
-       result.scope!=="https://www.googleapis.com/auth/gmail.readonly")) {
-      throw Error("OAUTH_INVALID");
+    // OAuth token errors are deliberately classified using Google error
+    // *codes*, never raw response bodies, error descriptions or credentials.
+    let response:Response;
+    try {
+      response=await fetcher(TOKEN_URL,{
+        method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},
+        body,redirect:"error",cache:"no-store",signal:AbortSignal.timeout(10_000),
+      });
+    } catch {
+      throw Error("OAUTH_TRANSPORT_ERROR");
     }
+    let raw:unknown;
+    try { raw=await response.json(); } catch {
+      throw Error("OAUTH_NONJSON_RESPONSE");
+    }
+    const result=parseBody(raw);
+    if (!response.ok) {
+      const error=typeof result.error==="string" ? result.error : "";
+      // Only approved constant error codes are emitted to Railway.
+      if(error==="invalid_grant") throw Error("OAUTH_INVALID_GRANT");
+      if(error==="invalid_client") throw Error("OAUTH_INVALID_CLIENT");
+      if(error==="unauthorized_client") throw Error("OAUTH_UNAUTHORIZED_CLIENT");
+      if(error==="access_denied") throw Error("OAUTH_ACCESS_DENIED");
+      if(error==="invalid_scope") throw Error("OAUTH_INVALID_SCOPE");
+      if(error==="temporarily_unavailable" || response.status>=500)
+        throw Error("OAUTH_PROVIDER_UNAVAILABLE");
+      throw Error("OAUTH_TOKEN_REJECTED");
+    }
+    // Google can return additional scopes on an otherwise valid grant.
+    // Check membership rather than rejecting an entire space-delimited list.
+    const scopes=typeof result.scope==="string"
+      ? result.scope.trim().split(/\\s+/) : null;
+    if(typeof result.token_type!=="string" ||
+       result.token_type.toLowerCase()!=="bearer" ||
+       typeof result.access_token!=="string" ||
+       result.access_token.length<10 ||
+       typeof result.expires_in!=="number" ||
+       !Number.isFinite(result.expires_in) ||
+       result.expires_in<60 || result.expires_in>7200) {
+      throw Error("OAUTH_INVALID_TOKEN_RESPONSE");
+    }
+    if(scopes && !scopes.includes("https://www.googleapis.com/auth/gmail.readonly"))
+      throw Error("OAUTH_SCOPE_MISMATCH");
     this.access=result.access_token;
     this.until=now+(result.expires_in-60)*1000;
     return this.access;
@@ -145,7 +177,16 @@ export async function scanOnce(env:Env,store:SeenStore,cache:OAuthCache,
   if(!Array.isArray(snapshot.eligible)||snapshot.eligible.length>100)throw Error("INVALID_SNAPSHOT");
   if(snapshot.eligible.length===0)return {eligible:0,examined:0,approved:0,review:0};
 
-  const accessToken=await cache.token(env,fetcher).catch(()=>{throw Error("SLICE_GMAIL_OAUTH_UNAVAILABLE");});
+  const accessToken=await cache.token(env,fetcher).catch(error=>{
+    const safe=new Set([
+      "OAUTH_TRANSPORT_ERROR","OAUTH_NONJSON_RESPONSE","OAUTH_INVALID_GRANT",
+      "OAUTH_INVALID_CLIENT","OAUTH_UNAUTHORIZED_CLIENT","OAUTH_ACCESS_DENIED",
+      "OAUTH_INVALID_SCOPE","OAUTH_PROVIDER_UNAVAILABLE","OAUTH_TOKEN_REJECTED",
+      "OAUTH_INVALID_TOKEN_RESPONSE","OAUTH_SCOPE_MISMATCH",
+    ]);
+    if(error instanceof Error && safe.has(error.message)) throw error;
+    throw Error("SLICE_GMAIL_OAUTH_UNAVAILABLE");
+  });
   const list=await fetchJson(fetcher,GMAIL+"?"+new URLSearchParams({
     q:"from:noreply@slice.bank.in subject:Received newer_than:2d",
     maxResults:"30",
@@ -202,6 +243,10 @@ async function main():Promise<void>{
           "SLICE_SNAPSHOT_UNAVAILABLE","SLICE_GMAIL_OAUTH_UNAVAILABLE",
           "SLICE_GMAIL_LIST_UNAVAILABLE","SLICE_GMAIL_MESSAGE_UNAVAILABLE",
           "EMAIL_APPROVAL_UNAVAILABLE","PRODUCTION_EMAIL_DISABLED",
+          "OAUTH_TRANSPORT_ERROR","OAUTH_NONJSON_RESPONSE","OAUTH_INVALID_GRANT",
+          "OAUTH_INVALID_CLIENT","OAUTH_UNAUTHORIZED_CLIENT","OAUTH_ACCESS_DENIED",
+          "OAUTH_INVALID_SCOPE","OAUTH_PROVIDER_UNAVAILABLE","OAUTH_TOKEN_REJECTED",
+          "OAUTH_INVALID_TOKEN_RESPONSE","OAUTH_SCOPE_MISMATCH",
         ].includes(error.message)?error.message:"slice_email_scan_unavailable";
         // Stage-only diagnosis; NEVER echo OAuth response, bank message,
         // account numbers, secret material or customer data.
