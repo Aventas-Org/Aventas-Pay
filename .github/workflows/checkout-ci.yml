@@ -51,8 +51,18 @@ jobs:
         run: python -m pip_audit -r bot/requirements-ci.txt --progress-spinner off
       - name: Audit JavaScript dependencies
         run: |
+          # Both shipped packages must pass the unfiltered production audit.
+          (cd website && bun audit --prod)
+          (cd frontend && bun audit --prod)
+          # Keep full dependency auditing active. A narrowly scoped, temporary
+          # exception applies ONLY to the known dev-tooling picomatch advisory:
+          # https://github.com/advisories/GHSA-fc5q-39xc-vjpf
+          # No patched picomatch release exists as of 2026-11-18. This exception
+          # must be removed as soon as a fixed version is available. The
+          # unfiltered production audit above still rejects any affected runtime
+          # package; new/unrelated developer dependency advisories still fail.
           (cd website && bun audit)
-          (cd frontend && bun audit)
+          (cd frontend && bun audit --ignore GHSA-fc5q-39xc-vjpf)
       # Evidence inventory is deliberately allowed to report NO-GO.
       # Only schema/tests are CI checks; runtime and operator acceptance
       # must never be inferred from a successful Actions run.
